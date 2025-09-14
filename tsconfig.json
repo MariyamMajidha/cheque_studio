@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM"],
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["shared/*"]
+    },
+    "allowJs": false,
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": [],
+    "typeRoots": ["./renderer/src/types", "./node_modules/@types"]
+  },
+  "include": ["electron", "renderer", "shared", "tests", "renderer", "renderer/vite.config.ts", "tailwind.config.cjs"]
+}

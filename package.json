@@ -1,0 +1,82 @@
+{
+  "name": "electron-cheque-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Electron Cheque Template Designer & Printer",
+  "main": "dist-electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:mainbuild\" \"npm:dev:electron\"",
+    "dev:renderer": "vite --config ./renderer/vite.config.ts",
+    "dev:mainbuild": "tsup electron/main.ts electron/preload.ts --format cjs --out-dir dist-electron --external electron --watch",
+    "dev:electron": "wait-on dist-electron/main.cjs && nodemon -q -w dist-electron -e cjs --exec \"electron dist-electron/main.cjs\"",
+    "build": "npx rimraf dist dist-electron && vite build --config ./renderer/vite.config.ts && tsup electron/main.ts electron/preload.ts --format cjs --out-dir dist-electron --external electron && cpy electron/db/migrations dist-electron/db/migrations --flat",
+    "test": "jest",
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier -w .",
+    "seed": "ts-node --project electron/tsconfig.json electron/scripts/seed.ts"
+  },
+  "build": {
+    "appId": "com.mtcc.electron-cheque-studio",
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": "nsis",
+      "publisherName": "MTCC"
+    }
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.0.0",
+    "@tanstack/react-router": "^1.0.0",
+    "better-sqlite3": "^11.7.0",
+    "clsx": "^2.1.1",
+    "immer": "^10.1.1",
+    "jszip": "^3.10.1",
+    "konva": "^9.3.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-konva": "^18.2.10",
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.8",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.9",
+    "@types/electron": "^1.4.38",
+    "@types/node": "^22.5.4",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@types/xlsx": "^0.0.36",
+    "@typescript-eslint/eslint-plugin": "^8.6.0",
+    "@typescript-eslint/parser": "^8.6.0",
+    "@vitejs/plugin-react": "^5.0.2",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^9.1.0",
+    "cpy-cli": "^5.0.0",
+    "electron": "^31.3.2",
+    "electron-builder": "^25.1.8",
+    "eslint": "^9.9.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react": "^7.35.0",
+    "jest": "^29.7.0",
+    "konva": "^9.3.15",
+    "nodemon": "^3.1.10",
+    "postcss": "^8.5.6",
+    "prettier": "^3.3.3",
+    "rimraf": "^6.0.1",
+    "tailwindcss": "^3.4.10",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.2",
+    "wait-on": "^8.0.4"
+  }
+}
