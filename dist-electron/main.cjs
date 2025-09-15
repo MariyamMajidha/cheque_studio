@@ -58,6 +58,7 @@ function runMigrations(database) {
     console.warn("[migrations] No migrations directory found. Skipping migration step.");
     return;
   }
+  console.log("[migrations] Using directory:", dirToUse);
   database.exec(`
     CREATE TABLE IF NOT EXISTS _migrations(
       id TEXT PRIMARY KEY,
@@ -69,7 +70,10 @@ function runMigrations(database) {
   );
   const files = import_node_fs.default.readdirSync(dirToUse).filter((f) => f.endsWith(".sql")).sort((a, b) => a.localeCompare(b));
   for (const file of files) {
-    if (applied.has(file)) continue;
+    if (applied.has(file)) {
+      continue;
+    }
+    console.log(`[migrations] Applying: ${file}`);
     const sql = import_node_fs.default.readFileSync(import_node_path.default.join(dirToUse, file), "utf8");
     const tx = database.transaction(() => {
       database.exec(sql);
@@ -219,7 +223,7 @@ var boxSchema = import_zod.z.object({
   id: import_zod.z.number().int().nonnegative().optional(),
   template_id: import_zod.z.number().int().nonnegative(),
   label: import_zod.z.string(),
-  mapped_field: import_zod.z.union([import_zod.z.nativeEnum(Field), import_zod.z.literal("")]),
+  mapped_field: import_zod.z.union([import_zod.z.nativeEnum(Field), import_zod.z.literal(""), import_zod.z.null()]),
   x_mm: import_zod.z.number(),
   y_mm: import_zod.z.number(),
   w_mm: import_zod.z.number().positive(),

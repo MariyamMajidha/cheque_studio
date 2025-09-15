@@ -91,18 +91,17 @@ export default function PropertiesPanel({ selected, onPatch }: Props) {
               max={7}
               className="mt-1 w-full border rounded px-2 py-1"
               value={
-                Number.isFinite(selected.date_digit_index ?? -1)
-                  ? selected.date_digit_index
-                  : ""
+                selected.date_digit_index === null ||
+                selected.date_digit_index === undefined
+                  ? ""
+                  : selected.date_digit_index
               }
               placeholder="Leave blank to print full date"
               onChange={(e) => {
                 const raw = e.target.value;
                 onPatch({
                   date_digit_index:
-                    raw === ""
-                      ? undefined
-                      : Math.max(0, Math.min(7, Number(raw))),
+                    raw === "" ? null : Math.max(0, Math.min(7, Number(raw))),
                 });
               }}
             />

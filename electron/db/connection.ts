@@ -16,6 +16,11 @@ export function getDb(): Database.Database {
 
   fs.mkdirSync(dbDir, { recursive: true });
 
+  // console.log('[DB] userData path:', userData);
+  // console.log('[DB] dbDir:', dbDir);
+  // console.log('[DB] dbFile:', dbFile);
+  // console.log('[DB] dbPath:', dbPath);
+
   db = new Database(dbPath);
   db.pragma('journal_mode = wal');
 
@@ -38,11 +43,11 @@ function runMigrations(database: Database.Database) {
   const dirToUse = candidates.find((p) => p && fs.existsSync(p));
 
   if (!dirToUse) {
-    // In dev, it's OK to run without migrations if DB already exists.
-    // Log once so we know what's happening.
     console.warn('[migrations] No migrations directory found. Skipping migration step.');
     return;
   }
+
+  console.log('[migrations] Using directory:', dirToUse);
 
   database.exec(`
     CREATE TABLE IF NOT EXISTS _migrations(
@@ -64,8 +69,12 @@ function runMigrations(database: Database.Database) {
     .sort((a, b) => a.localeCompare(b));
 
   for (const file of files) {
-    if (applied.has(file)) continue;
+    if (applied.has(file)) {
+      //console.log(`[migrations] Already applied: ${file}`);
+      continue;
+    }
 
+    console.log(`[migrations] Applying: ${file}`);
     const sql = fs.readFileSync(path.join(dirToUse, file), 'utf8');
 
     const tx = database.transaction(() => {
@@ -76,7 +85,6 @@ function runMigrations(database: Database.Database) {
     });
 
     tx();
-    // Optional: log applied migration
-    // console.log(`[migrations] Applied ${file}`);
+    // console.log(`[migrations] Applied: ${file}`);
   }
 }

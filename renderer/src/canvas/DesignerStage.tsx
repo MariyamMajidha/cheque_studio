@@ -1,3 +1,4 @@
+// path: renderer/src/canvas/DesignerStage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Rect, Transformer } from "react-konva";
 import { mmToPx } from "../lib/units";
@@ -7,16 +8,22 @@ import PropertiesPanel from "./PropertiesPanel";
 export type BoxNode = {
   id: string;
   label: string;
-  mapped_field?: Field | null;
+  // align with IPC schema (allows '', null)
+  mapped_field?: Field | "" | null;
+
   x_mm: number;
   y_mm: number;
   w_mm: number;
   h_mm: number;
+
   rotation?: number;
   locked?: boolean;
   font_size?: number;
-  date_format?: string;
-  date_digit_index?: number;
+
+  // ✅ keep date fields in node state and make digit index nullable
+  date_format?: string | null;
+  date_digit_index?: number | null;
+
   align?: "left" | "center" | "right";
 };
 
@@ -77,7 +84,16 @@ export default function DesignerStage({
 
   const patchSelected = (patch: Partial<BoxNode>) => {
     if (!selectedId) return;
-    onChange(boxes.map((b) => (b.id === selectedId ? { ...b, ...patch } : b)));
+    onChange(
+      boxes.map((b) =>
+        b.id === selectedId
+          ? {
+              ...b,
+              ...patch,
+            }
+          : b
+      )
+    );
   };
 
   return (

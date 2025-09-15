@@ -1,4 +1,4 @@
-// path: renderer/src/routes/Designer.tsx  (replace the previous file with this fuller one)
+// path: renderer/src/routes/Designer.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import DesignerStage, { BoxNode } from "../canvas/DesignerStage";
 import PropertiesPanel from "../canvas/PropertiesPanel";
@@ -37,6 +37,10 @@ export default function Designer() {
           locked: !!r.locked,
           font_size: r.font_size ?? 12,
           align: (r.align as any) ?? "left",
+          // ✅ hydrate date fields
+          date_format: r.date_format ?? null,
+          date_digit_index:
+            typeof r.date_digit_index === "number" ? r.date_digit_index : null,
         }));
         setBoxes(mapped);
       } catch (e) {
@@ -48,7 +52,6 @@ export default function Designer() {
   // proxy to track selection from Stage
   const onStageChange = (next: BoxNode[]) => {
     setBoxes(next);
-    // keep selection if still present
     if (selectedId && !next.find((b) => b.id === selectedId))
       setSelectedId(null);
   };
@@ -65,22 +68,31 @@ export default function Designer() {
         h_mm: 12,
         font_size: 12,
         align: "left",
+        // ✅ init date fields
+        date_format: null,
+        date_digit_index: null,
       },
     ]);
   };
+
   const duplicate = () => {
     if (!selectedId) return;
     const src = boxes.find((b) => b.id === selectedId);
     if (!src) return;
     setBoxes((b) => [
       ...b,
-      { ...src, id: uid(), x_mm: src.x_mm + 5, y_mm: src.y_mm + 5 },
+      {
+        ...src,
+        id: uid(),
+        x_mm: src.x_mm + 5,
+        y_mm: src.y_mm + 5,
+      },
     ]);
   };
+
   const clearAll = () => setBoxes([]);
 
   const save = async () => {
-    // convert BoxNode → BoxRow for IPC
     await window.api.boxes.upsertMany(
       tid,
       boxes.map((b, idx) => ({
@@ -103,6 +115,10 @@ export default function Designer() {
         rotation: b.rotation ?? 0,
         locked: b.locked ? 1 : 0,
         z_index: idx,
+        // ✅ persist date fields
+        date_format: b.date_format ?? null,
+        date_digit_index:
+          typeof b.date_digit_index === "number" ? b.date_digit_index : null,
       }))
     );
     alert("Saved!");
@@ -112,6 +128,7 @@ export default function Designer() {
   const selected = selectedId
     ? (boxes.find((b) => b.id === selectedId) ?? null)
     : null;
+
   const onPatch = (patch: Partial<BoxNode>) => {
     if (!selectedId) return;
     setBoxes((bs) =>
@@ -175,14 +192,11 @@ export default function Designer() {
               paperHeightMm={paperHeightMm}
               zoom={zoom}
               boxes={boxes}
-              onChange={(next) => {
-                // tap into selection by watching which item got resized/dragged:
-                setBoxes(next);
-              }}
+              onChange={(next) => setBoxes(next)}
             />
           </div>
 
-          {/* <PropertiesPanel selected={selected} onPatch={onPatch} /> */}
+          <PropertiesPanel selected={selected} onPatch={onPatch} />
         </div>
       </main>
     </div>

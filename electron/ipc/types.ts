@@ -47,7 +47,7 @@ export const boxSchema = z.object({
   id: z.number().int().nonnegative().optional(),
   template_id: z.number().int().nonnegative(),
   label: z.string(),
-  mapped_field: z.union([z.nativeEnum(Field), z.literal('')]),
+  mapped_field: z.union([z.nativeEnum(Field), z.literal(''), z.null()]),
   x_mm: z.number(),
   y_mm: z.number(),
   w_mm: z.number().positive(),
