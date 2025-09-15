@@ -1,19 +1,15 @@
+// path: electron/ipc/handlers/print.ts
 import { BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import { getDb } from '../../db/connection';
 import type { PrintPreviewArgs, PrintRunArgs } from '../types';
-import { createPrintWindow, buildPreviewUrl } from '../../printing/print'; // 👈 import helpers
-
-function getAppUrl(hashPath: string) {
-  const dev = process.env.VITE_DEV_SERVER_URL;
-  return dev
-    ? `${dev}#${hashPath}`
-    : `file://${path.join(process.cwd(), 'dist', 'index.html')}#${hashPath}`;
-}
+import { createPrintWindow, buildPreviewUrl } from '../../printing/print';
+import { getAppUrl } from '../../printing/url';
 
 export function registerPrintIpc(): void {
   ipcMain.removeHandler('print:preview');
   ipcMain.removeHandler('print:run');
+  ipcMain.removeHandler('print:run-current'); // new
 
   // ---------- Preview ----------
   ipcMain.handle('print:preview', async (_evt, args: PrintPreviewArgs) => {
@@ -22,7 +18,7 @@ export function registerPrintIpc(): void {
     const template = db
       .prepare(
         `SELECT id, name, width_mm, height_mm, dpi, orientation, margin_mm, background_path
-           FROM templates WHERE id = ?`
+                FROM templates WHERE id = ?`
       )
       .get(args.templateId);
     if (!template) throw new Error('Template not found');
@@ -30,13 +26,13 @@ export function registerPrintIpc(): void {
     const boxes = db
       .prepare(
         `SELECT id, template_id, label, mapped_field,
-                x_mm, y_mm, w_mm, h_mm,
-                font_family, font_size, bold, italic, align, uppercase,
-                letter_spacing, line_height, color, rotation,
-                locked, z_index, date_format, date_digit_index
-           FROM template_boxes
-          WHERE template_id = ?
-          ORDER BY z_index ASC, id ASC`
+                       x_mm, y_mm, w_mm, h_mm,
+                       font_family, font_size, bold, italic, align, uppercase,
+                       letter_spacing, line_height, color, rotation,
+                       locked, z_index, date_format, date_digit_index
+                 FROM template_boxes
+                 WHERE template_id = ?
+                 ORDER BY z_index ASC, id ASC`
       )
       .all(args.templateId);
 
@@ -45,14 +41,16 @@ export function registerPrintIpc(): void {
       ? db
           .prepare(
             `SELECT id, template_id, date, payee, amount, amount_words
-                 FROM cheques
-                WHERE id IN (${ids.map(() => '?').join(',')})
-                ORDER BY id ASC`
+                    FROM cheques
+                    WHERE id IN (${ids.map(() => '?').join(',')})
+                    ORDER BY id ASC`
           )
           .all(...ids)
       : [];
 
     const templateWithBoxes = { ...template, _boxes: boxes };
+    const ox = args.offsets?.offset_x_mm ?? 0;
+    const oy = args.offsets?.offset_y_mm ?? 0;
 
     const previewWin = new BrowserWindow({
       width: 980,
@@ -65,27 +63,33 @@ export function registerPrintIpc(): void {
       }
     });
 
-    const ox = args.offsets?.offset_x_mm ?? 0;
-    const oy = args.offsets?.offset_y_mm ?? 0;
     const url = getAppUrl(
       `/print/preview?templateId=${args.templateId}&chequeIds=${ids.join(',')}&ox=${ox}&oy=${oy}`
     );
-
     await previewWin.loadURL(url);
-    await new Promise((r) => previewWin.webContents.once('did-finish-load' as any, r));
 
-    previewWin.webContents.send('print:payload', { template: templateWithBoxes, cheques });
+    // Handshake: wait for THIS window to say it's ready, then send payload to it
+    const targetId = previewWin.webContents.id;
+    const onReady = (evt: Electron.IpcMainEvent) => {
+      if (evt.sender.id !== targetId) return;
+      evt.sender.send('print:payload', {
+        template: templateWithBoxes,
+        cheques,
+        offsets: { x: ox, y: oy }
+      });
+      ipcMain.removeListener('print:ready', onReady);
+    };
+    ipcMain.on('print:ready', onReady);
   });
 
-  // ---------- Print ----------
-  // ---------- Print ----------
+  // ---------- Print: run with full args (background worker window) ----------
   ipcMain.handle('print:run', async (_evt, args: PrintRunArgs) => {
     const db = getDb();
 
     const template = db
       .prepare(
         `SELECT id, name, width_mm, height_mm, dpi, orientation, margin_mm, background_path
-         FROM templates WHERE id = ?`
+                FROM templates WHERE id = ?`
       )
       .get(args.templateId);
     if (!template) throw new Error('Template not found');
@@ -93,13 +97,13 @@ export function registerPrintIpc(): void {
     const boxes = db
       .prepare(
         `SELECT id, template_id, label, mapped_field,
-              x_mm, y_mm, w_mm, h_mm,
-              font_family, font_size, bold, italic, align, uppercase,
-              letter_spacing, line_height, color, rotation,
-              locked, z_index, date_format, date_digit_index
-         FROM template_boxes
-        WHERE template_id = ?
-        ORDER BY z_index ASC, id ASC`
+                       x_mm, y_mm, w_mm, h_mm,
+                       font_family, font_size, bold, italic, align, uppercase,
+                       letter_spacing, line_height, color, rotation,
+                       locked, z_index, date_format, date_digit_index
+                 FROM template_boxes
+                 WHERE template_id = ?
+                 ORDER BY z_index ASC, id ASC`
       )
       .all(args.templateId);
 
@@ -108,31 +112,28 @@ export function registerPrintIpc(): void {
       ? db
           .prepare(
             `SELECT id, template_id, date, payee, amount, amount_words
-               FROM cheques
-              WHERE id IN (${ids.map(() => '?').join(',')})
-              ORDER BY id ASC`
+                    FROM cheques
+                    WHERE id IN (${ids.map(() => '?').join(',')})
+                    ORDER BY id ASC`
           )
           .all(...ids)
       : [];
 
     const templateWithBoxes = { ...template, _boxes: boxes };
-
-    // -----------------------------
-    // Use new helpers here
-    // -----------------------------
     const ox = args.offsets?.offset_x_mm ?? 0;
     const oy = args.offsets?.offset_y_mm ?? 0;
 
     const worker = createPrintWindow(!args.silent);
-    const url = buildPreviewUrl(args.templateId, ids, ox, oy);
-
-    console.log('[print:run] loadURL =>', url);
-    await worker.loadURL(url);
+    const wurl = buildPreviewUrl(args.templateId, ids, ox, oy);
+    await worker.loadURL(wurl);
     await new Promise((r) => worker.webContents.once('did-finish-load' as any, r));
 
-    worker.webContents.send('print:payload', { template: templateWithBoxes, cheques });
+    worker.webContents.send('print:payload', {
+      template: templateWithBoxes,
+      cheques,
+      offsets: { x: ox, y: oy }
+    });
 
-    // give React/Canvas a moment to paint
     await new Promise((r) => setTimeout(r, 150));
     if (!args.silent) worker.focus();
 
@@ -150,5 +151,13 @@ export function registerPrintIpc(): void {
     });
 
     if (args.silent && !worker.isDestroyed()) worker.close();
+  });
+
+  // ---------- Print: current preview window (no args) ----------
+  ipcMain.on('print:run-current', (evt) => {
+    const contents = evt.sender;
+    contents.print({ silent: false, printBackground: true }, (ok, err) => {
+      if (!ok && err) console.error('print:run-current failed:', err);
+    });
   });
 }

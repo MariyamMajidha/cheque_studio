@@ -462,23 +462,17 @@ ${candidates.join("\n")}`
 }
 function getAppUrl(hashPath) {
   const dev = process.env.VITE_DEV_SERVER_URL;
-  if (dev) {
-    const u2 = `${dev}#${hashPath}`;
-    console.log("[getAppUrl] using env:", u2);
-    return u2;
-  }
-  const main = import_electron5.BrowserWindow.getAllWindows()[0];
-  const current = main?.webContents.getURL();
-  if (current && current.startsWith("http")) {
-    const origin = current.split("#")[0];
-    const u2 = `${origin}#${hashPath}`;
-    console.log("[getAppUrl] sniffed origin:", u2);
-    return u2;
+  if (dev) return `${dev}#${hashPath}`;
+  const wins = import_electron5.BrowserWindow.getAllWindows();
+  for (const w of wins) {
+    const current = w.webContents.getURL();
+    if (current && current.startsWith("http")) {
+      const origin = current.split("#")[0];
+      return `${origin}#${hashPath}`;
+    }
   }
   const indexFile = findBuiltIndex();
-  const u = `file://${indexFile}#${hashPath}`;
-  console.log("[getAppUrl] fallback file:", u);
-  return u;
+  return `file://${indexFile}#${hashPath}`;
 }
 
 // electron/printing/print.ts
@@ -502,38 +496,37 @@ function createPrintWindow(show = false) {
 }
 
 // electron/ipc/handlers/print.ts
-function getAppUrl2(hashPath) {
-  const dev = process.env.VITE_DEV_SERVER_URL;
-  return dev ? `${dev}#${hashPath}` : `file://${import_node_path4.default.join(process.cwd(), "dist", "index.html")}#${hashPath}`;
-}
 function registerPrintIpc() {
   import_electron7.ipcMain.removeHandler("print:preview");
   import_electron7.ipcMain.removeHandler("print:run");
+  import_electron7.ipcMain.removeHandler("print:run-current");
   import_electron7.ipcMain.handle("print:preview", async (_evt, args) => {
     const db2 = getDb();
     const template = db2.prepare(
       `SELECT id, name, width_mm, height_mm, dpi, orientation, margin_mm, background_path
-           FROM templates WHERE id = ?`
+                FROM templates WHERE id = ?`
     ).get(args.templateId);
     if (!template) throw new Error("Template not found");
     const boxes = db2.prepare(
       `SELECT id, template_id, label, mapped_field,
-                x_mm, y_mm, w_mm, h_mm,
-                font_family, font_size, bold, italic, align, uppercase,
-                letter_spacing, line_height, color, rotation,
-                locked, z_index, date_format, date_digit_index
-           FROM template_boxes
-          WHERE template_id = ?
-          ORDER BY z_index ASC, id ASC`
+                       x_mm, y_mm, w_mm, h_mm,
+                       font_family, font_size, bold, italic, align, uppercase,
+                       letter_spacing, line_height, color, rotation,
+                       locked, z_index, date_format, date_digit_index
+                 FROM template_boxes
+                 WHERE template_id = ?
+                 ORDER BY z_index ASC, id ASC`
     ).all(args.templateId);
     const ids = (args.chequeIds ?? []).filter((n) => Number.isFinite(n) && n > 0);
     const cheques = ids.length ? db2.prepare(
       `SELECT id, template_id, date, payee, amount, amount_words
-                 FROM cheques
-                WHERE id IN (${ids.map(() => "?").join(",")})
-                ORDER BY id ASC`
+                    FROM cheques
+                    WHERE id IN (${ids.map(() => "?").join(",")})
+                    ORDER BY id ASC`
     ).all(...ids) : [];
     const templateWithBoxes = { ...template, _boxes: boxes };
+    const ox = args.offsets?.offset_x_mm ?? 0;
+    const oy = args.offsets?.offset_y_mm ?? 0;
     const previewWin = new import_electron7.BrowserWindow({
       width: 980,
       height: 740,
@@ -544,48 +537,58 @@ function registerPrintIpc() {
         preload: import_node_path4.default.join(process.cwd(), "dist-electron", "preload.cjs")
       }
     });
-    const ox = args.offsets?.offset_x_mm ?? 0;
-    const oy = args.offsets?.offset_y_mm ?? 0;
-    const url = getAppUrl2(
+    const url = getAppUrl(
       `/print/preview?templateId=${args.templateId}&chequeIds=${ids.join(",")}&ox=${ox}&oy=${oy}`
     );
     await previewWin.loadURL(url);
-    await new Promise((r) => previewWin.webContents.once("did-finish-load", r));
-    previewWin.webContents.send("print:payload", { template: templateWithBoxes, cheques });
+    const targetId = previewWin.webContents.id;
+    const onReady = (evt) => {
+      if (evt.sender.id !== targetId) return;
+      evt.sender.send("print:payload", {
+        template: templateWithBoxes,
+        cheques,
+        offsets: { x: ox, y: oy }
+      });
+      import_electron7.ipcMain.removeListener("print:ready", onReady);
+    };
+    import_electron7.ipcMain.on("print:ready", onReady);
   });
   import_electron7.ipcMain.handle("print:run", async (_evt, args) => {
     const db2 = getDb();
     const template = db2.prepare(
       `SELECT id, name, width_mm, height_mm, dpi, orientation, margin_mm, background_path
-         FROM templates WHERE id = ?`
+                FROM templates WHERE id = ?`
     ).get(args.templateId);
     if (!template) throw new Error("Template not found");
     const boxes = db2.prepare(
       `SELECT id, template_id, label, mapped_field,
-              x_mm, y_mm, w_mm, h_mm,
-              font_family, font_size, bold, italic, align, uppercase,
-              letter_spacing, line_height, color, rotation,
-              locked, z_index, date_format, date_digit_index
-         FROM template_boxes
-        WHERE template_id = ?
-        ORDER BY z_index ASC, id ASC`
+                       x_mm, y_mm, w_mm, h_mm,
+                       font_family, font_size, bold, italic, align, uppercase,
+                       letter_spacing, line_height, color, rotation,
+                       locked, z_index, date_format, date_digit_index
+                 FROM template_boxes
+                 WHERE template_id = ?
+                 ORDER BY z_index ASC, id ASC`
     ).all(args.templateId);
     const ids = (args.chequeIds ?? []).filter((n) => Number.isFinite(n) && n > 0);
     const cheques = ids.length ? db2.prepare(
       `SELECT id, template_id, date, payee, amount, amount_words
-               FROM cheques
-              WHERE id IN (${ids.map(() => "?").join(",")})
-              ORDER BY id ASC`
+                    FROM cheques
+                    WHERE id IN (${ids.map(() => "?").join(",")})
+                    ORDER BY id ASC`
     ).all(...ids) : [];
     const templateWithBoxes = { ...template, _boxes: boxes };
     const ox = args.offsets?.offset_x_mm ?? 0;
     const oy = args.offsets?.offset_y_mm ?? 0;
     const worker = createPrintWindow(!args.silent);
-    const url = buildPreviewUrl(args.templateId, ids, ox, oy);
-    console.log("[print:run] loadURL =>", url);
-    await worker.loadURL(url);
+    const wurl = buildPreviewUrl(args.templateId, ids, ox, oy);
+    await worker.loadURL(wurl);
     await new Promise((r) => worker.webContents.once("did-finish-load", r));
-    worker.webContents.send("print:payload", { template: templateWithBoxes, cheques });
+    worker.webContents.send("print:payload", {
+      template: templateWithBoxes,
+      cheques,
+      offsets: { x: ox, y: oy }
+    });
     await new Promise((r) => setTimeout(r, 150));
     if (!args.silent) worker.focus();
     await new Promise((resolve, reject) => {
@@ -602,35 +605,74 @@ function registerPrintIpc() {
     });
     if (args.silent && !worker.isDestroyed()) worker.close();
   });
+  import_electron7.ipcMain.on("print:run-current", (evt) => {
+    const contents = evt.sender;
+    contents.print({ silent: false, printBackground: true }, (ok, err) => {
+      if (!ok && err) console.error("print:run-current failed:", err);
+    });
+  });
 }
 
 // electron/main.ts
 var isDev = !import_electron8.app.isPackaged;
+try {
+  process.stdout.on?.("error", (err) => {
+    if (err && err.code === "EPIPE") return;
+    throw err;
+  });
+  process.stderr.on?.("error", (err) => {
+    if (err && err.code === "EPIPE") return;
+    throw err;
+  });
+} catch {
+}
+if (isDev && !process.env.VITE_DEV_SERVER_URL) {
+  process.env.VITE_DEV_SERVER_URL = "http://localhost:5173";
+}
 function createWindow() {
   const win = new import_electron8.BrowserWindow({
     width: 1200,
     height: 800,
+    show: false,
+    // show after ready-to-show to avoid flashes
     webPreferences: {
       preload: isDev ? import_node_path5.default.join(process.cwd(), "dist-electron", "preload.cjs") : import_node_path5.default.join(process.resourcesPath, "dist-electron", "preload.cjs"),
       nodeIntegration: false,
       contextIsolation: true
     }
   });
-  const url = isDev ? "http://localhost:5173" : `file://${import_node_path5.default.join(process.resourcesPath, "dist", "index.html")}`;
+  const url = isDev ? process.env.VITE_DEV_SERVER_URL : `file://${import_node_path5.default.join(process.resourcesPath, "dist", "index.html")}`;
   console.log("[main] isDev:", isDev, "\u2192 loading:", url);
-  win.loadURL(url);
+  win.loadURL(url).catch((e) => console.error("[main] loadURL error:", e));
+  win.once("ready-to-show", () => win.show());
   if (isDev) win.webContents.openDevTools({ mode: "detach" });
-}
-import_electron8.app.whenReady().then(() => {
-  registerTemplateIpc();
-  registerBoxesIpc();
-  registerChequesIpc();
-  registerPrintIpc();
-  createWindow();
-  import_electron8.app.on("activate", () => {
-    if (import_electron8.BrowserWindow.getAllWindows().length === 0) createWindow();
+  win.webContents.on("render-process-gone", (_e, details) => {
+    console.error("[main] renderer gone:", details);
   });
-});
-import_electron8.app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") import_electron8.app.quit();
-});
+  return win;
+}
+var gotLock = import_electron8.app.requestSingleInstanceLock();
+if (!gotLock) {
+  import_electron8.app.quit();
+} else {
+  import_electron8.app.on("second-instance", () => {
+    const [win] = import_electron8.BrowserWindow.getAllWindows();
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+  });
+  import_electron8.app.whenReady().then(() => {
+    registerTemplateIpc();
+    registerBoxesIpc();
+    registerChequesIpc();
+    registerPrintIpc();
+    createWindow();
+    import_electron8.app.on("activate", () => {
+      if (import_electron8.BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+  import_electron8.app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") import_electron8.app.quit();
+  });
+}

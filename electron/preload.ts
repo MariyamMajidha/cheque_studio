@@ -47,22 +47,21 @@ type Api = {
     importExcel(args?: any): Promise<{ ok: boolean; imported: number }>;
   };
   print: {
-    /** Ask main to open the dedicated preview window and feed it data */
+    /** Open preview window (main will feed payload after 'ready') */
     preview(args: PrintPreviewArgs): Promise<void>;
-
-    /** Ask main to print (usually the preview window) */
+    /** Background print flow (separate worker window) */
     run(args: PrintRunArgs): Promise<void>;
-
-    /** Preview window calls this to receive the payload from main */
+    /** Subscribe to payload the main sends to preview */
     onPayload(cb: (data: any) => void): () => void;
-
-    /** Preview window calls this once its DOM is ready so main can send */
+    /** Tell main that the preview page is ready to receive payload */
     ready(): void;
+    /** Ask main to print the CURRENT (preview) window */
+    runCurrent(): void;
   };
 };
 
 const api: Api = {
-  // ---------------- Templates ----------------
+  // -------- Templates --------
   templates: {
     list: () => ipcRenderer.invoke('templates:list'),
     get: (id) => ipcRenderer.invoke('templates:get', id),
@@ -71,14 +70,14 @@ const api: Api = {
     delete: (id) => ipcRenderer.invoke('templates:delete', id)
   },
 
-  // ---------------- Boxes --------------------
+  // -------- Boxes --------
   boxes: {
     list: (templateId) => ipcRenderer.invoke('boxes:list', templateId),
     upsertMany: (templateId, boxes) => ipcRenderer.invoke('boxes:upsertMany', templateId, boxes),
     delete: (id) => ipcRenderer.invoke('boxes:delete', id)
   },
 
-  // ---------------- Cheques ------------------
+  // -------- Cheques --------
   cheques: {
     list: (templateId) => ipcRenderer.invoke('cheques:list', { template_id: templateId }),
     createOne: (payload) => ipcRenderer.invoke('cheques:createOne', payload),
@@ -87,7 +86,7 @@ const api: Api = {
     importExcel: (args) => ipcRenderer.invoke('cheques:importExcel', args)
   },
 
-  // ---------------- Print --------------------
+  // -------- Print --------
   print: {
     preview: (args) => ipcRenderer.invoke('print:preview', args),
     run: (args) => ipcRenderer.invoke('print:run', args),
@@ -98,9 +97,10 @@ const api: Api = {
       return () => ipcRenderer.removeListener('print:payload', handler);
     },
 
-    ready: () => {
-      ipcRenderer.send('print:ready');
-    }
+    ready: () => ipcRenderer.send('print:ready'),
+
+    // NEW: print the *current* preview window (handled by main on 'print:run-current')
+    runCurrent: () => ipcRenderer.send('print:run-current')
   }
 };
 

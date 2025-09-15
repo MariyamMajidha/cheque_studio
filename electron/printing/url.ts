@@ -1,4 +1,3 @@
-// path: electron/printing/url.ts
 import { app, BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,28 +22,34 @@ function findBuiltIndex(): string {
   return hit;
 }
 
+/**
+ * Build an app URL for a hash route.
+ * Order:
+ * 1) VITE_DEV_SERVER_URL env
+ * 2) Any open BrowserWindow with an http(s) URL (not just the first)
+ * 3) file:// path to built index.html
+ */
 export function getAppUrl(hashPath: string): string {
-  // 1) Dev: explicit env
   const dev = process.env.VITE_DEV_SERVER_URL;
-  if (dev) {
-    const u = `${dev}#${hashPath}`;
-    console.log('[getAppUrl] using env:', u);
-    return u;
+  if (dev) return `${dev}#${hashPath}`;
+
+  // Look through ALL windows — the first can be about:blank (the preview)
+  const wins = BrowserWindow.getAllWindows();
+  for (const w of wins) {
+    const current = w.webContents.getURL();
+    if (current && current.startsWith('http')) {
+      const origin = current.split('#')[0];
+      return `${origin}#${hashPath}`;
+    }
   }
 
-  // 2) Dev: sniff currently loaded main window (localhost:5173#/…)
-  const main = BrowserWindow.getAllWindows()[0];
-  const current = main?.webContents.getURL();
-  if (current && current.startsWith('http')) {
-    const origin = current.split('#')[0];
-    const u = `${origin}#${hashPath}`;
-    console.log('[getAppUrl] sniffed origin:', u);
-    return u;
-  }
-
-  // 3) Prod: fallback to built file
   const indexFile = findBuiltIndex();
-  const u = `file://${indexFile}#${hashPath}`;
-  console.log('[getAppUrl] fallback file:', u);
-  return u;
+  return `file://${indexFile}#${hashPath}`;
+}
+
+export function buildPreviewUrl(templateId: number, chequeIds: number[], ox = 0, oy = 0) {
+  const ids = chequeIds.filter((n) => Number.isFinite(n) && n > 0);
+  return getAppUrl(
+    `/print/preview?templateId=${templateId}&chequeIds=${ids.join(',')}&ox=${ox}&oy=${oy}`
+  );
 }

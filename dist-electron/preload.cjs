@@ -18,7 +18,7 @@ var preload_exports = {};
 module.exports = __toCommonJS(preload_exports);
 var import_electron = require("electron");
 var api = {
-  // ---------------- Templates ----------------
+  // -------- Templates --------
   templates: {
     list: () => import_electron.ipcRenderer.invoke("templates:list"),
     get: (id) => import_electron.ipcRenderer.invoke("templates:get", id),
@@ -26,13 +26,13 @@ var api = {
     update: (id, patch) => import_electron.ipcRenderer.invoke("templates:update", id, patch),
     delete: (id) => import_electron.ipcRenderer.invoke("templates:delete", id)
   },
-  // ---------------- Boxes --------------------
+  // -------- Boxes --------
   boxes: {
     list: (templateId) => import_electron.ipcRenderer.invoke("boxes:list", templateId),
     upsertMany: (templateId, boxes) => import_electron.ipcRenderer.invoke("boxes:upsertMany", templateId, boxes),
     delete: (id) => import_electron.ipcRenderer.invoke("boxes:delete", id)
   },
-  // ---------------- Cheques ------------------
+  // -------- Cheques --------
   cheques: {
     list: (templateId) => import_electron.ipcRenderer.invoke("cheques:list", { template_id: templateId }),
     createOne: (payload) => import_electron.ipcRenderer.invoke("cheques:createOne", payload),
@@ -40,7 +40,7 @@ var api = {
     delete: (id) => import_electron.ipcRenderer.invoke("cheques:delete", id),
     importExcel: (args) => import_electron.ipcRenderer.invoke("cheques:importExcel", args)
   },
-  // ---------------- Print --------------------
+  // -------- Print --------
   print: {
     preview: (args) => import_electron.ipcRenderer.invoke("print:preview", args),
     run: (args) => import_electron.ipcRenderer.invoke("print:run", args),
@@ -49,9 +49,9 @@ var api = {
       import_electron.ipcRenderer.on("print:payload", handler);
       return () => import_electron.ipcRenderer.removeListener("print:payload", handler);
     },
-    ready: () => {
-      import_electron.ipcRenderer.send("print:ready");
-    }
+    ready: () => import_electron.ipcRenderer.send("print:ready"),
+    // NEW: print the *current* preview window (handled by main on 'print:run-current')
+    runCurrent: () => import_electron.ipcRenderer.send("print:run-current")
   }
 };
 import_electron.contextBridge.exposeInMainWorld("api", api);

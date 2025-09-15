@@ -2,57 +2,47 @@
 import React from "react";
 import { Stage, Layer, Rect, Text } from "react-konva";
 import { mmToPx } from "../lib/units";
-import { Field } from "@shared/constants";
+import { Field } from "../../../shared/constants";
 
-/**
- * Try to parse a date string users might type (dd-MM-yyyy, dd/MM/yyyy, yyyy-MM-dd, etc.)
- * Returns a real Date or null.
- */
+/** Parse common date inputs: dd-MM-yyyy, dd/MM/yyyy, yyyy-MM-dd, etc. */
 function parseLooseDate(s: string): Date | null {
   if (!s) return null;
 
-  // yyyy-MM-dd (or yyyy/MM/dd)
+  // yyyy-MM-dd or yyyy/MM/dd
   let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
   if (m) {
-    const [_, y, mo, d] = m.map(Number);
+    const y = Number(m[1]),
+      mo = Number(m[2]),
+      d = Number(m[3]);
     const dt = new Date(y, mo - 1, d);
     return isNaN(dt.getTime()) ? null : dt;
   }
 
-  // dd-MM-yyyy (or dd/MM/yyyy)
+  // dd-MM-yyyy or dd/MM/yyyy
   m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
   if (m) {
-    const [_, d, mo, y] = m.map(Number);
+    const d = Number(m[1]),
+      mo = Number(m[2]),
+      y = Number(m[3]);
     const dt = new Date(y, mo - 1, d);
     return isNaN(dt.getTime()) ? null : dt;
   }
 
-  // As a last resort, let Date try (works for some locales, ISO, etc.)
+  // Fallback
   const dt = new Date(s);
   return isNaN(dt.getTime()) ? null : dt;
 }
 
-/**
- * Produce a continuous string of digits for the given order, e.g.:
- * order "DDMMYYYY" -> "25092012"
- * order "MMDDYYYY" -> "09252012"
- * Defaults to DDMMYYYY if order not recognized.
- */
-function formatDateDigits(dateStr: string, order?: string): string {
+/** Render full date string per a format like DDMMYYYY, MMDDYYYY, YYYYMMDD, DD-MM-YYYY, etc. */
+function formatDateFull(dateStr: string, fmt: string = "DDMMYYYY"): string {
   const dt = parseLooseDate(dateStr);
   if (!dt) return "";
 
-  const d = dt.getDate(); // 1..31
-  const m = dt.getMonth() + 1; // 1..12
-  const y = dt.getFullYear(); // 4-digit
+  const DD = String(dt.getDate()).padStart(2, "0");
+  const MM = String(dt.getMonth() + 1).padStart(2, "0");
+  const YYYY = String(dt.getFullYear());
 
-  const DD = d.toString().padStart(2, "0");
-  const MM = m.toString().padStart(2, "0");
-  const YYYY = y.toString().padStart(4, "0");
-
-  const ord = (order || "DDMMYYYY").toUpperCase();
-
-  switch (ord) {
+  switch (fmt) {
     case "DDMMYYYY":
       return `${DD}${MM}${YYYY}`;
     case "MMDDYYYY":
@@ -61,15 +51,38 @@ function formatDateDigits(dateStr: string, order?: string): string {
       return `${YYYY}${MM}${DD}`;
     case "YYYYDDMM":
       return `${YYYY}${DD}${MM}`;
-    default:
-      // Unknown pattern -> default to DDMMYYYY
+    case "DD-MM-YYYY":
+      return `${DD}-${MM}-${YYYY}`;
+    case "DD/MM/YYYY":
+      return `${DD}/${MM}/${YYYY}`;
+    case "DD.MM.YYYY":
+      return `${DD}.${MM}.${YYYY}`;
+    default: {
+      // Try to honor custom separators/order crudely
+      const sep = fmt.includes("-")
+        ? "-"
+        : fmt.includes("/")
+          ? "/"
+          : fmt.includes(".")
+            ? "."
+            : "";
+      if (sep) {
+        const parts = fmt
+          .split(sep)
+          .map((t) => (t.startsWith("Y") ? YYYY : t.startsWith("M") ? MM : DD));
+        return parts.join(sep);
+      }
       return `${DD}${MM}${YYYY}`;
+    }
   }
 }
 
-/**
- * Resolve the text to render for a box, supporting per-digit date boxes.
- */
+/** Produce a continuous digits-only string for digit slicing */
+function formatDateDigits(dateStr: string, order?: string): string {
+  return formatDateFull(dateStr, order).replace(/\D/g, "");
+}
+
+/** Resolve the text to render for a box, with per-digit date support. */
 function resolveBoxText(b: any, cheque: any, fallback: string): string {
   const field = b.mapped_field;
 
@@ -80,26 +93,28 @@ function resolveBoxText(b: any, cheque: any, fallback: string): string {
     case Field.AmountWords:
       return cheque.amount_words ?? "";
 
-    case Field.AmountNumeric:
-      return cheque.amount != null ? String(cheque.amount) : "";
+    case Field.AmountNumeric: {
+      const n = Number(cheque.amount);
+      return isFinite(n)
+        ? n.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })
+        : "";
+    }
 
     case Field.Date: {
-      // If the box carries date digit mapping info, render a single digit.
-      // Expected metadata (optional): b.date_format: "DDMMYYYY" | "MMDDYYYY" | ...
-      //                               b.date_digit_index: number (0-based)
-      const hasDigit =
-        typeof (b as any).date_digit_index === "number" &&
-        (b as any).date_digit_index >= 0;
+      const idx = (b as any).date_digit_index;
+      const fmt = (b as any).date_format || "DDMMYYYY";
 
-      if (hasDigit) {
-        const order = (b as any).date_format || "DDMMYYYY";
-        const digits = formatDateDigits(cheque.date ?? "", order);
-        const idx = Number((b as any).date_digit_index) || 0;
+      // If a digit index is provided, return just that digit (0–7)
+      if (typeof idx === "number" && idx >= 0) {
+        const digits = formatDateDigits(cheque.date ?? "", fmt);
         return digits[idx] ?? "";
       }
 
-      // Fallback: render full date as provided
-      return cheque.date ?? "";
+      // Otherwise, return the full formatted date
+      return formatDateFull(cheque.date ?? "", fmt);
     }
 
     default:
