@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 
+/** Find built index.html (fallback for normal app pages) */
 function findBuiltIndex(): string {
   const appPath = app.getAppPath();
   const resPath = process.resourcesPath ?? '';
@@ -22,34 +23,56 @@ function findBuiltIndex(): string {
   return hit;
 }
 
+/** Find built preview.html for dedicated print page */
+function findBuiltPreview(): string {
+  const appPath = app.getAppPath();
+  const resPath = process.resourcesPath ?? '';
+  const candidates = [
+    path.join(appPath, 'dist', 'preview.html'),
+    path.join(resPath, 'dist', 'preview.html'),
+    path.join(process.cwd(), 'dist', 'preview.html')
+  ];
+  const hit = candidates.find((p) => p && fs.existsSync(p));
+  if (!hit) {
+    throw new Error(
+      `[getAppUrl] Could not locate preview.html.\nChecked:\n${candidates.join('\n')}`
+    );
+  }
+  return hit;
+}
+
 /**
- * Build an app URL for a hash route.
- * Order:
- * 1) VITE_DEV_SERVER_URL env
- * 2) Any open BrowserWindow with an http(s) URL (not just the first)
- * 3) file:// path to built index.html
+ * Returns a URL for the renderer. If the path starts with "/print/preview"
+ * we load the dedicated /preview.html; otherwise we route to index.html#hash.
  */
 export function getAppUrl(hashPath: string): string {
-  const dev = process.env.VITE_DEV_SERVER_URL;
-  if (dev) return `${dev}#${hashPath}`;
+  const dev = process.env.VITE_DEV_SERVER_URL?.replace(/\/$/, '');
 
-  // Look through ALL windows — the first can be about:blank (the preview)
-  const wins = BrowserWindow.getAllWindows();
-  for (const w of wins) {
-    const current = w.webContents.getURL();
-    if (current && current.startsWith('http')) {
-      const origin = current.split('#')[0];
-      return `${origin}#${hashPath}`;
+  // --- Dedicated print preview: /preview.html?...
+  if (hashPath.startsWith('/print/preview')) {
+    const qIndex = hashPath.indexOf('?');
+    const qs = qIndex >= 0 ? hashPath.slice(qIndex) : '';
+    if (dev) {
+      // In dev, Vite serves public/preview.html directly
+      return `${dev}/preview.html${qs}`;
     }
+    const previewFile = findBuiltPreview();
+    return `file://${previewFile}${qs}`;
+  }
+
+  // --- Normal app pages via index.html#...
+  if (dev) {
+    return `${dev}#${hashPath}`;
+  }
+
+  // If the main window is http in dev-like states, reuse its origin
+  const main = BrowserWindow.getAllWindows()[0];
+  const current = main?.webContents.getURL();
+  if (current && current.startsWith('http')) {
+    const origin = current.split('#')[0];
+    return `${origin}#${hashPath}`;
   }
 
   const indexFile = findBuiltIndex();
   return `file://${indexFile}#${hashPath}`;
-}
-
-export function buildPreviewUrl(templateId: number, chequeIds: number[], ox = 0, oy = 0) {
-  const ids = chequeIds.filter((n) => Number.isFinite(n) && n > 0);
-  return getAppUrl(
-    `/print/preview?templateId=${templateId}&chequeIds=${ids.join(',')}&ox=${ox}&oy=${oy}`
-  );
 }

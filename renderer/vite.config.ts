@@ -22,5 +22,12 @@ export default defineConfig({
     outDir: path.resolve(__dirname, "../dist"),
     emptyOutDir: true,
     sourcemap: true,
+    rollupOptions: {
+      // 👇 tell Vite we have two HTML entry points
+      input: {
+        index: path.resolve(__dirname, "index.html"),
+        preview: path.resolve(__dirname, "preview.html"),
+      },
+    },
   },
 });

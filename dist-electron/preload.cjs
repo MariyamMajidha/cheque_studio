@@ -43,14 +43,18 @@ var api = {
   // -------- Print --------
   print: {
     preview: (args) => import_electron.ipcRenderer.invoke("print:preview", args),
-    run: (args) => import_electron.ipcRenderer.invoke("print:run", args),
+    // If args are present -> full print worker flow; else -> print this (preview) window.
+    run: (args) => {
+      if (args) return import_electron.ipcRenderer.invoke("print:run", args);
+      import_electron.ipcRenderer.send("print:run-current");
+      return Promise.resolve();
+    },
     onPayload: (cb) => {
       const handler = (_evt, data) => cb(data);
       import_electron.ipcRenderer.on("print:payload", handler);
       return () => import_electron.ipcRenderer.removeListener("print:payload", handler);
     },
     ready: () => import_electron.ipcRenderer.send("print:ready"),
-    // NEW: print the *current* preview window (handled by main on 'print:run-current')
     runCurrent: () => import_electron.ipcRenderer.send("print:run-current")
   }
 };

@@ -1,47 +1,58 @@
-// path: renderer/src/canvas/PreviewCanvas.tsx
 import React from "react";
 import { Stage, Layer, Rect, Text } from "react-konva";
-import { mmToPx } from "../lib/units";
 import { Field } from "../../../shared/constants";
 
-/** Parse common date inputs: dd-MM-yyyy, dd/MM/yyyy, yyyy-MM-dd, etc. */
+/** mm → px at a given DPI */
+const mmToPx = (mm: number, dpi: number) => (mm / 25.4) * dpi;
+
+/** Be tolerant of older/variant field strings coming from DB. */
+function normalizeField(v: unknown): Field | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v).toLowerCase().trim();
+  // Known canonical names (keep in sync with shared/constants)
+  if (s === String(Field.PayeeName).toLowerCase()) return Field.PayeeName;
+  if (s === String(Field.AmountWords).toLowerCase()) return Field.AmountWords;
+  if (s === String(Field.AmountNumeric).toLowerCase())
+    return Field.AmountNumeric;
+  if (s === String(Field.Date).toLowerCase()) return Field.Date;
+
+  // Legacy fallbacks commonly seen
+  if (["payee", "name", "payee_name"].includes(s)) return Field.PayeeName;
+  if (["amount_words", "amountinwords", "words"].includes(s))
+    return Field.AmountWords;
+  if (["amount", "amount_numeric", "num", "numeric"].includes(s))
+    return Field.AmountNumeric;
+  if (["date", "cheque_date", "dt"].includes(s)) return Field.Date;
+
+  return null;
+}
+
+/** Parse common date inputs */
 function parseLooseDate(s: string): Date | null {
   if (!s) return null;
-
-  // yyyy-MM-dd or yyyy/MM/dd
-  let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/); // yyyy-MM-dd
   if (m) {
-    const y = Number(m[1]),
-      mo = Number(m[2]),
-      d = Number(m[3]);
+    const [_, y, mo, d] = m.map(Number);
     const dt = new Date(y, mo - 1, d);
     return isNaN(dt.getTime()) ? null : dt;
   }
-
-  // dd-MM-yyyy or dd/MM/yyyy
-  m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/); // dd-MM-yyyy
   if (m) {
-    const d = Number(m[1]),
-      mo = Number(m[2]),
-      y = Number(m[3]);
+    const [_, d, mo, y] = m.map(Number);
     const dt = new Date(y, mo - 1, d);
     return isNaN(dt.getTime()) ? null : dt;
   }
-
-  // Fallback
   const dt = new Date(s);
   return isNaN(dt.getTime()) ? null : dt;
 }
 
-/** Render full date string per a format like DDMMYYYY, MMDDYYYY, YYYYMMDD, DD-MM-YYYY, etc. */
+/** Format a full date string respecting simple patterns (incl. separators) */
 function formatDateFull(dateStr: string, fmt: string = "DDMMYYYY"): string {
   const dt = parseLooseDate(dateStr);
   if (!dt) return "";
-
   const DD = String(dt.getDate()).padStart(2, "0");
   const MM = String(dt.getMonth() + 1).padStart(2, "0");
   const YYYY = String(dt.getFullYear());
-
   switch (fmt) {
     case "DDMMYYYY":
       return `${DD}${MM}${YYYY}`;
@@ -58,7 +69,6 @@ function formatDateFull(dateStr: string, fmt: string = "DDMMYYYY"): string {
     case "DD.MM.YYYY":
       return `${DD}.${MM}.${YYYY}`;
     default: {
-      // Try to honor custom separators/order crudely
       const sep = fmt.includes("-")
         ? "-"
         : fmt.includes("/")
@@ -66,55 +76,44 @@ function formatDateFull(dateStr: string, fmt: string = "DDMMYYYY"): string {
           : fmt.includes(".")
             ? "."
             : "";
-      if (sep) {
-        const parts = fmt
-          .split(sep)
-          .map((t) => (t.startsWith("Y") ? YYYY : t.startsWith("M") ? MM : DD));
-        return parts.join(sep);
-      }
-      return `${DD}${MM}${YYYY}`;
+      if (!sep) return `${DD}${MM}${YYYY}`;
+      const parts = fmt
+        .split(sep)
+        .map((p) => (p.startsWith("Y") ? YYYY : p.startsWith("M") ? MM : DD));
+      return parts.join(sep);
     }
   }
 }
+const formatDateDigits = (s: string, order?: string) =>
+  formatDateFull(s, order).replace(/\D/g, "");
 
-/** Produce a continuous digits-only string for digit slicing */
-function formatDateDigits(dateStr: string, order?: string): string {
-  return formatDateFull(dateStr, order).replace(/\D/g, "");
-}
+function resolveBoxText(box: any, cheque: any, fallback: string): string {
+  const kind = normalizeField(box.mapped_field);
 
-/** Resolve the text to render for a box, with per-digit date support. */
-function resolveBoxText(b: any, cheque: any, fallback: string): string {
-  const field = b.mapped_field;
-
-  switch (field) {
+  switch (kind) {
     case Field.PayeeName:
-      return cheque.payee ?? "";
+      return cheque?.payee ?? "";
 
     case Field.AmountWords:
-      return cheque.amount_words ?? "";
+      return cheque?.amount_words ?? "";
 
     case Field.AmountNumeric: {
-      const n = Number(cheque.amount);
-      return isFinite(n)
-        ? n.toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })
-        : "";
+      const n = Number(cheque?.amount);
+      if (!isFinite(n)) return "";
+      return n.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
     }
 
     case Field.Date: {
-      const idx = (b as any).date_digit_index;
-      const fmt = (b as any).date_format || "DDMMYYYY";
-
-      // If a digit index is provided, return just that digit (0–7)
+      const fmt = box.date_format || "DDMMYYYY";
+      const idx = box.date_digit_index;
       if (typeof idx === "number" && idx >= 0) {
-        const digits = formatDateDigits(cheque.date ?? "", fmt);
+        const digits = formatDateDigits(cheque?.date ?? "", fmt);
         return digits[idx] ?? "";
       }
-
-      // Otherwise, return the full formatted date
-      return formatDateFull(cheque.date ?? "", fmt);
+      return formatDateFull(cheque?.date ?? "", fmt);
     }
 
     default:
@@ -131,31 +130,41 @@ export default function PreviewCanvas({
   cheques: any[];
   offsets: { x: number; y: number };
 }) {
-  const w = mmToPx(template.width_mm, template.dpi);
-  const h = mmToPx(template.height_mm, template.dpi);
-  const ox = mmToPx(offsets.x, template.dpi);
-  const oy = mmToPx(offsets.y, template.dpi);
+  const dpi = template.dpi;
+  const W = mmToPx(template.width_mm, dpi);
+  const H = mmToPx(template.height_mm, dpi);
+  const ox = mmToPx(offsets.x, dpi);
+  const oy = mmToPx(offsets.y, dpi);
 
-  const firstCheque = cheques?.[0];
+  const cheque = cheques?.[0] ?? null;
 
   return (
-    <Stage width={w} height={h}>
+    <Stage
+      width={W}
+      height={H}
+      listening={false}
+      pixelRatio={2} // crisper text on print/retina
+    >
       <Layer>
-        <Rect x={0} y={0} width={w} height={h} fill="#fff" />
-        {firstCheque &&
+        {/* Paper */}
+        <Rect x={0} y={0} width={W} height={H} fill="#ffffff" />
+
+        {/* Draw only text (no design boxes) */}
+        {cheque &&
           (template._boxes ?? []).map((b: any) => (
             <Text
               key={b.id}
-              x={mmToPx(b.x_mm, template.dpi) + ox}
-              y={mmToPx(b.y_mm, template.dpi) + oy}
-              width={mmToPx(b.w_mm, template.dpi)}
-              height={mmToPx(b.h_mm, template.dpi)}
-              text={resolveBoxText(b, firstCheque, b.label)}
-              align={b.align || "left"}
+              x={mmToPx(b.x_mm, dpi) + ox}
+              y={mmToPx(b.y_mm, dpi) + oy}
+              width={mmToPx(b.w_mm, dpi)}
+              height={mmToPx(b.h_mm, dpi)}
+              text={resolveBoxText(b, cheque, "")}
+              align={(b.align as "left" | "center" | "right") || "left"}
               fontFamily={b.font_family || undefined}
               fontStyle={
-                `${b.bold ? "bold" : ""} ${b.italic ? "italic" : ""}`.trim() ||
-                undefined
+                [b.bold ? "bold" : "", b.italic ? "italic" : ""]
+                  .filter(Boolean)
+                  .join(" ") || undefined
               }
               fontSize={b.font_size || 12}
               fill={b.color || "#000"}

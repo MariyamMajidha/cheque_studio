@@ -1,100 +1,187 @@
-// path: renderer/src/routes/PrintPreview.tsx
 import React from "react";
 
-// Payload expected from main
+// Lazy canvas so the window paints fast
+const PreviewCanvas = React.lazy(() => import("../canvas/PreviewCanvas"));
+
+/** Very small helper to read hash query: #/print/preview?ox=..&oy=.. */
+function readQuery(): Record<string, string> {
+  const hash = globalThis.location?.hash ?? "";
+  const qPos = hash.indexOf("?");
+  const sp = new URLSearchParams(qPos >= 0 ? hash.slice(qPos + 1) : "");
+  const out: Record<string, string> = {};
+  sp.forEach((v, k) => (out[k] = v));
+  return out;
+}
+
 type PreviewPayload = {
   template: any;
   cheques: any[];
   offsets?: { x: number; y: number };
 };
 
-const PreviewCanvas = React.lazy(() => import("../canvas/PreviewCanvas"));
-
-function parseSearch(): Record<string, string> {
-  const raw = globalThis.location?.hash || "";
-  const i = raw.indexOf("?");
-  const qs = new URLSearchParams(i >= 0 ? raw.slice(i + 1) : "");
-  const out: Record<string, string> = {};
-  qs.forEach((v, k) => (out[k] = v));
-  return out;
-}
-
 export default function PrintPreview() {
   const [data, setData] = React.useState<PreviewPayload | null>(null);
-  const [waiting, setWaiting] = React.useState(true);
+  const [zoom, setZoom] = React.useState(1); // screen-only zoom (reset for print)
 
-  // 1) Subscribe first, then notify main we’re ready (prevents race)
+  // Receive payload from main
   React.useEffect(() => {
-    const off = window.api.print.onPayload((p: PreviewPayload) => {
-      setData(p);
-      setWaiting(false);
-    });
+    const off = window.api.print.onPayload((p: PreviewPayload) => setData(p));
     window.api.print.ready();
-    return () => off();
-  }, []);
-
-  // 2) Optional fallback: show stub if query is present but IPC hasn’t arrived yet
-  React.useEffect(() => {
+    // Fallback so the route is visibly loaded even if IPC is slow
     const t = setTimeout(() => {
-      if (data) return;
-      const q = parseSearch();
-      if (q.templateId || q.chequeIds) {
-        setData({
-          template: { name: "Loading… (waiting for IPC payload)" },
-          cheques: [],
-          offsets: { x: Number(q.ox ?? 0) || 0, y: Number(q.oy ?? 0) || 0 },
-        });
+      if (!data) {
+        const q = readQuery();
+        if (q.templateId) {
+          setData({
+            template: { name: "Loading…" },
+            cheques: [],
+            offsets: { x: Number(q.ox ?? 0) || 0, y: Number(q.oy ?? 0) || 0 },
+          });
+        }
       }
-      setWaiting(false);
     }, 300);
-    return () => clearTimeout(t);
-  }, [data]);
+    return () => {
+      off();
+      clearTimeout(t);
+    };
+  }, []); // eslint-disable-line
 
-  const doPrint = () => window.api.print.runCurrent();
+  // Compute a preview zoom that fits the paper on screen (but never used for print)
+  const paperPx = React.useMemo(() => {
+    if (!data?.template) return { w: 0, h: 0 };
+    const { width_mm, height_mm, dpi } = data.template;
+    const mmToPx = (mm: number) => (mm / 25.4) * dpi;
+    return { w: mmToPx(width_mm), h: mmToPx(height_mm) };
+  }, [data?.template]);
 
-  if (waiting && !data) {
-    return (
-      <div className="p-6">
-        <h2 className="text-lg font-semibold">
-          Print Preview — Loading… (waiting for IPC payload)
-        </h2>
-      </div>
-    );
-  }
+  React.useEffect(() => {
+    if (!paperPx.w || !paperPx.h) return;
+    // leave a bit of padding around paper
+    const pad = 48;
+    const availW = Math.max(320, window.innerWidth - pad * 2);
+    const availH = Math.max(240, window.innerHeight - pad * 2);
+    const z = Math.min(availW / paperPx.w, availH / paperPx.h, 1); // never upscale in preview
+    setZoom(z);
+  }, [paperPx.w, paperPx.h]);
 
-  if (!data) {
-    return (
-      <div className="p-6 space-y-2">
-        <div className="text-red-600 font-medium">No preview data.</div>
-        <div className="text-gray-600">
-          Main must send <code>print:payload</code> after this page emits{" "}
-          <code>print:ready</code>.
-        </div>
-      </div>
-    );
-  }
+  const doPrint = async () => {
+    // main will print the current sender (this preview window)
+    await window.api.print.run(undefined as any);
+  };
 
   return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">
-          Print Preview{data.template?.name ? ` — ${data.template.name}` : ""}
-        </h2>
-        <button
-          className="px-3 py-1 rounded bg-blue-600 text-white"
-          onClick={doPrint}
-        >
-          Print
-        </button>
+    <div
+      style={{
+        background: "#0f172a", // slate-900-ish
+        minHeight: "100vh",
+        padding: 24,
+        boxSizing: "border-box",
+      }}
+    >
+      {/* Screen toolbar (hidden in print) */}
+      <div
+        className="preview-toolbar"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 16,
+          color: "white",
+          fontWeight: 600,
+        }}
+      >
+        <div>
+          Print Preview {data?.template?.name ? `— ${data.template.name}` : ""}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={() =>
+              setZoom((z) => Math.max(0.25, +(z - 0.1).toFixed(2)))
+            }
+          >
+            −
+          </button>
+          <span style={{ minWidth: 56, textAlign: "center" }}>
+            {(zoom * 100) | 0}%
+          </span>
+          <button
+            onClick={() => setZoom((z) => Math.min(1, +(z + 0.1).toFixed(2)))}
+          >
+            +
+          </button>
+          <button
+            onClick={doPrint}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 8,
+              background: "#2563eb",
+              color: "white",
+              fontWeight: 600,
+            }}
+          >
+            Print
+          </button>
+        </div>
       </div>
 
-      <React.Suspense fallback={<div className="p-2">Rendering canvas…</div>}>
-        <PreviewCanvas
-          template={data.template}
-          cheques={data.cheques}
-          offsets={data.offsets ?? { x: 0, y: 0 }}
-        />
-      </React.Suspense>
+      {/* Paper mat */}
+      <div
+        style={{
+          display: "grid",
+          placeItems: "center",
+          height: "calc(100vh - 80px)",
+        }}
+      >
+        <div
+          id="preview-paper"
+          style={{
+            transform: `scale(${zoom})`,
+            transformOrigin: "top left",
+            width: `${paperPx.w}px`,
+            height: `${paperPx.h}px`,
+            boxShadow: "0 10px 25px rgba(0,0,0,.35), 0 3px 8px rgba(0,0,0,.35)",
+            borderRadius: 12,
+            overflow: "hidden",
+            background: "white",
+          }}
+        >
+          <React.Suspense fallback={null}>
+            {data && (
+              <PreviewCanvas
+                template={data.template}
+                cheques={data.cheques}
+                offsets={data.offsets ?? { x: 0, y: 0 }}
+              />
+            )}
+          </React.Suspense>
+        </div>
+      </div>
+
+      {/* Print-only rules */}
+      <style>{`
+        @media print {
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            background: white !important;
+          }
+          .preview-toolbar { display: none !important; }
+          #preview-paper {
+            /* IMPORTANT: 1:1 scale for print */
+            transform: none !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            width: ${paperPx.w}px !important;
+            height: ${paperPx.h}px !important;
+            margin: 0 !important;
+          }
+          /* Only paper should be printable area */
+          body > *:not(#preview-paper):not(.preview-toolbar) { display: none !important; }
+          #preview-paper { display: block !important; }
+        }
+      `}</style>
     </div>
   );
 }

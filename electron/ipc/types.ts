@@ -163,6 +163,6 @@ export interface IpcApi {
   };
   print: {
     preview: (args: PrintPreviewArgs) => Promise<void>;
-    run: (args: PrintRunArgs) => Promise<void>;
+    run: (args?: PrintRunArgs) => Promise<void>; // ← args optional
   };
 }

@@ -1,6 +1,6 @@
 // path: electron/scripts/seed.ts
-import { getDb } from "../db/connection";
-import { Field } from "../../shared/constants";
+import { getDb } from '../db/connection';
+import { Field } from '../../shared/constants';
 
 const db = getDb();
 
@@ -10,25 +10,29 @@ const tStmt = db.prepare(
    VALUES(?,?,?,?,?,?,?)`
 );
 const res = tStmt.run(
-  "MDV Cheque A5",
+  'MDV Cheque A5',
   210, // width A5 landscape-ish
   99,
   300,
-  "Landscape",
+  'Landscape',
   5,
   null
 );
 const templateId = Number(res.lastInsertRowid);
 
 const boxes = [
-  { label: "Payee", field: Field.PayeeName, x: 40, y: 28, w: 120, h: 10, align: "left" },
-  { label: "Amount Words", field: Field.AmountWords, x: 20, y: 42, w: 170, h: 12, align: "left" },
-  { label: "Amount Numeric", field: Field.AmountNumeric, x: 155, y: 28, w: 35, h: 10, align: "right" },
-  { label: "Date", field: Field.Date, x: 160, y: 12, w: 30, h: 8, align: "center" },
-  { label: "Cheque No", field: Field.ChequeNumber, x: 160, y: 4, w: 30, h: 8, align: "center" },
-  { label: "Account No", field: Field.AccountNumber, x: 20, y: 12, w: 50, h: 8, align: "left" },
-  { label: "Bank", field: Field.BankName, x: 20, y: 4, w: 60, h: 8, align: "left" },
-  { label: "Branch", field: Field.Branch, x: 82, y: 4, w: 40, h: 8, align: "left" }
+  { label: 'Payee', field: Field.PayeeName, x: 40, y: 28, w: 120, h: 10, align: 'left' },
+  { label: 'Amount Words', field: Field.AmountWords, x: 20, y: 42, w: 170, h: 12, align: 'left' },
+  {
+    label: 'Amount Numeric',
+    field: Field.AmountNumeric,
+    x: 155,
+    y: 28,
+    w: 35,
+    h: 10,
+    align: 'right'
+  },
+  { label: 'Date', field: Field.Date, x: 160, y: 12, w: 30, h: 8, align: 'center' }
 ];
 
 const ins = db.prepare(
@@ -53,4 +57,4 @@ const tx = db.transaction(() => {
 });
 tx();
 
-console.log("Seeded template id:", templateId);
+console.log('Seeded template id:', templateId);

@@ -47,15 +47,19 @@ type Api = {
     importExcel(args?: any): Promise<{ ok: boolean; imported: number }>;
   };
   print: {
-    /** Open preview window (main will feed payload after 'ready') */
+    /** Open preview window; main will send payload after the page signals 'ready'. */
     preview(args: PrintPreviewArgs): Promise<void>;
-    /** Background print flow (separate worker window) */
-    run(args: PrintRunArgs): Promise<void>;
-    /** Subscribe to payload the main sends to preview */
+    /**
+     * Print:
+     * - If args provided → full background print flow.
+     * - If omitted       → prints the *current* preview window.
+     */
+    run(args?: PrintRunArgs): Promise<void>;
+    /** Subscribe to the payload main sends to the preview window. */
     onPayload(cb: (data: any) => void): () => void;
-    /** Tell main that the preview page is ready to receive payload */
+    /** Let main know the preview page is ready to receive the payload. */
     ready(): void;
-    /** Ask main to print the CURRENT (preview) window */
+    /** Explicit helper to print the *current* preview window. */
     runCurrent(): void;
   };
 };
@@ -89,7 +93,13 @@ const api: Api = {
   // -------- Print --------
   print: {
     preview: (args) => ipcRenderer.invoke('print:preview', args),
-    run: (args) => ipcRenderer.invoke('print:run', args),
+
+    // If args are present -> full print worker flow; else -> print this (preview) window.
+    run: (args?: PrintRunArgs) => {
+      if (args) return ipcRenderer.invoke('print:run', args);
+      ipcRenderer.send('print:run-current');
+      return Promise.resolve();
+    },
 
     onPayload: (cb) => {
       const handler = (_evt: IpcRendererEvent, data: any) => cb(data);
@@ -99,7 +109,6 @@ const api: Api = {
 
     ready: () => ipcRenderer.send('print:ready'),
 
-    // NEW: print the *current* preview window (handled by main on 'print:run-current')
     runCurrent: () => ipcRenderer.send('print:run-current')
   }
 };

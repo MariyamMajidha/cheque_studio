@@ -460,16 +460,43 @@ ${candidates.join("\n")}`
   }
   return hit;
 }
+function findBuiltPreview() {
+  const appPath = import_electron5.app.getAppPath();
+  const resPath = process.resourcesPath ?? "";
+  const candidates = [
+    import_node_path2.default.join(appPath, "dist", "preview.html"),
+    import_node_path2.default.join(resPath, "dist", "preview.html"),
+    import_node_path2.default.join(process.cwd(), "dist", "preview.html")
+  ];
+  const hit = candidates.find((p) => p && import_node_fs2.default.existsSync(p));
+  if (!hit) {
+    throw new Error(
+      `[getAppUrl] Could not locate preview.html.
+Checked:
+${candidates.join("\n")}`
+    );
+  }
+  return hit;
+}
 function getAppUrl(hashPath) {
-  const dev = process.env.VITE_DEV_SERVER_URL;
-  if (dev) return `${dev}#${hashPath}`;
-  const wins = import_electron5.BrowserWindow.getAllWindows();
-  for (const w of wins) {
-    const current = w.webContents.getURL();
-    if (current && current.startsWith("http")) {
-      const origin = current.split("#")[0];
-      return `${origin}#${hashPath}`;
+  const dev = process.env.VITE_DEV_SERVER_URL?.replace(/\/$/, "");
+  if (hashPath.startsWith("/print/preview")) {
+    const qIndex = hashPath.indexOf("?");
+    const qs = qIndex >= 0 ? hashPath.slice(qIndex) : "";
+    if (dev) {
+      return `${dev}/preview.html${qs}`;
     }
+    const previewFile = findBuiltPreview();
+    return `file://${previewFile}${qs}`;
+  }
+  if (dev) {
+    return `${dev}#${hashPath}`;
+  }
+  const main = import_electron5.BrowserWindow.getAllWindows()[0];
+  const current = main?.webContents.getURL();
+  if (current && current.startsWith("http")) {
+    const origin = current.split("#")[0];
+    return `${origin}#${hashPath}`;
   }
   const indexFile = findBuiltIndex();
   return `file://${indexFile}#${hashPath}`;
