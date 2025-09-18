@@ -1,0 +1,72 @@
+/* path: renderer/src/print/print.css */
+:root {
+    color-scheme: light;
+}
+
+.print-layout {
+    min-height: 100vh;
+    background: #0b1627;
+}
+
+.print-shell {
+    padding: 24px;
+    display: flex;
+    gap: 16px;
+}
+
+.controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.print-sheet {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .25);
+}
+
+.print-snapshot {
+    display: none;
+}
+
+@media print {
+
+    html,
+    body {
+        background: #fff !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* These two are injected dynamically from PreviewCanvas to match the cheque size:
+     @page { size: <w>mm <h>mm; margin:0 }
+     .print-sheet/.print-snapshot widths/heights in mm
+  */
+
+    /* Hide chrome */
+    .controls,
+    .app-sidebar,
+    .app-header {
+        display: none !important;
+    }
+
+    .print-shell {
+        padding: 0 !important;
+    }
+
+    .print-sheet {
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+    }
+
+    /* Swap canvas → snapshot to avoid blank PDF */
+    .print-sheet canvas {
+        display: none !important;
+    }
+
+    .print-snapshot {
+        display: block !important;
+    }
+}
