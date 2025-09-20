@@ -32,6 +32,120 @@ function BgThumb({ id, hasPath }: { id: number; hasPath: boolean }) {
   );
 }
 
+/** Small actions dropdown for each row */
+function RowActions({
+  row,
+  busy,
+  onDesign,
+  onUpdate,
+  onSetBg,
+  onClearBg,
+  onDelete,
+}: {
+  row: TemplateRow;
+  busy: boolean;
+  onDesign: (id: number) => void;
+  onUpdate: (row: TemplateRow) => void;
+  onSetBg: (id: number) => void;
+  onClearBg: (id: number) => void;
+  onDelete: (id: number) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, []);
+
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="px-2 py-1 rounded border hover:bg-gray-50"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Actions"
+      >
+        ⋯
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 mt-1 w-44 rounded-md border bg-white shadow-lg z-10 overflow-hidden"
+        >
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onDesign(row.id);
+            }}
+            className="w-full text-left px-3 py-2 hover:bg-gray-50"
+          >
+            Design
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onUpdate(row);
+            }}
+            className="w-full text-left px-3 py-2 hover:bg-gray-50"
+          >
+            Update
+          </button>
+          <div className="my-1 h-px bg-gray-200" />
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onSetBg(row.id);
+            }}
+            className="w-full text-left px-3 py-2 hover:bg-gray-50"
+          >
+            Set background…
+          </button>
+          <button
+            role="menuitem"
+            disabled={!row.background_path}
+            onClick={() => {
+              setOpen(false);
+              onClearBg(row.id);
+            }}
+            className="w-full text-left px-3 py-2 hover:bg-gray-50 disabled:text-gray-300 disabled:cursor-not-allowed"
+          >
+            Clear background
+          </button>
+          <div className="my-1 h-px bg-gray-200" />
+          <button
+            role="menuitem"
+            disabled={busy}
+            onClick={() => {
+              setOpen(false);
+              onDelete(row.id);
+            }}
+            className="w-full text-left px-3 py-2 hover:bg-red-50 text-red-600 disabled:opacity-50"
+          >
+            {busy ? "Deleting…" : "Delete"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Templates() {
   const nav = useNavigate();
   const [rows, setRows] = React.useState<TemplateRow[]>([]);
@@ -53,6 +167,7 @@ export default function Templates() {
   };
   const onEdit = (id: number) =>
     nav({ to: "/designer/$templateId", params: { templateId: String(id) } });
+
   const onDelete = async (id: number) => {
     if (!confirm("Delete this template? This will remove its boxes as well."))
       return;
@@ -112,7 +227,7 @@ export default function Templates() {
             <th className="text-left">DPI</th>
             <th className="text-left">Background</th>
             <th className="text-left">Updated</th>
-            <th className="text-left w-[420px]">Actions</th>
+            <th className="text-left w-24">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -136,7 +251,7 @@ export default function Templates() {
 
                 <td>
                   {isEditing ? (
-                    <div className="flex gap-1">
+                    <div className="flex items-center gap-1">
                       <input
                         type="number"
                         value={editRow.width_mm}
@@ -148,7 +263,7 @@ export default function Templates() {
                         }
                         className="border w-16 px-1"
                       />
-                      ×
+                      <span>×</span>
                       <input
                         type="number"
                         value={editRow.height_mm}
@@ -187,9 +302,9 @@ export default function Templates() {
 
                 <td>{r.updated_at?.replace("T", " ").slice(0, 19) ?? ""}</td>
 
-                <td className="space-x-2">
+                <td className="py-2">
                   {isEditing ? (
-                    <>
+                    <div className="flex gap-2">
                       <button
                         onClick={onSaveEdit}
                         className="px-2 py-1 rounded border bg-green-600 text-white"
@@ -202,42 +317,17 @@ export default function Templates() {
                       >
                         Cancel
                       </button>
-                    </>
+                    </div>
                   ) : (
-                    <>
-                      <button
-                        onClick={() => onEdit(r.id)}
-                        className="px-2 py-1 rounded border"
-                      >
-                        Design
-                      </button>
-                      <button
-                        onClick={() => setEditRow(r)}
-                        className="px-2 py-1 rounded border"
-                      >
-                        Update
-                      </button>
-                      <button
-                        onClick={() => onSetBg(r.id)}
-                        className="px-2 py-1 rounded border"
-                      >
-                        Set BG…
-                      </button>
-                      <button
-                        disabled={!r.background_path}
-                        onClick={() => onClearBg(r.id)}
-                        className="px-2 py-1 rounded border disabled:opacity-50"
-                      >
-                        Clear BG
-                      </button>
-                      <button
-                        disabled={busyId === r.id}
-                        onClick={() => onDelete(r.id)}
-                        className="px-2 py-1 rounded border text-red-600 disabled:opacity-50"
-                      >
-                        {busyId === r.id ? "Deleting…" : "Delete"}
-                      </button>
-                    </>
+                    <RowActions
+                      row={r}
+                      busy={busyId === r.id}
+                      onDesign={onEdit}
+                      onUpdate={setEditRow}
+                      onSetBg={onSetBg}
+                      onClearBg={onClearBg}
+                      onDelete={onDelete}
+                    />
                   )}
                 </td>
               </tr>
