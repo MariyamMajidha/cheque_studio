@@ -1,7 +1,5 @@
-// path: renderer/src/routes/Designer.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import DesignerStage, { BoxNode } from "../canvas/DesignerStage";
-import PropertiesPanel from "../canvas/PropertiesPanel";
 import { useParams } from "@tanstack/react-router";
 
 const DEFAULT_DPI = 150;
@@ -13,12 +11,18 @@ export default function Designer() {
   const { templateId } = useParams({ from: "/designer/$templateId" as any });
   const tid = Number(templateId) || 1;
 
-  const [paperWidthMm, setPaperWidthMm] = useState(210);
-  const [paperHeightMm, setPaperHeightMm] = useState(99);
-  const [dpi, setDpi] = useState(DEFAULT_DPI);
-  const [zoom, setZoom] = useState(1);
+  const [paperWidthMm] = useState(210);
+  const [paperHeightMm] = useState(99);
+  const [dpi] = useState(DEFAULT_DPI);
+
+  // Zoom as a percentage 10–100
+  const [zoomPct, setZoomPct] = useState(100);
+  const zoom = useMemo(
+    () => Math.max(10, Math.min(100, zoomPct)) / 100,
+    [zoomPct]
+  );
+
   const [boxes, setBoxes] = useState<BoxNode[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Load boxes from DB
   useEffect(() => {
@@ -37,7 +41,6 @@ export default function Designer() {
           locked: !!r.locked,
           font_size: r.font_size ?? 12,
           align: (r.align as any) ?? "left",
-          // ✅ hydrate date fields
           date_format: r.date_format ?? null,
           date_digit_index:
             typeof r.date_digit_index === "number" ? r.date_digit_index : null,
@@ -48,13 +51,6 @@ export default function Designer() {
       }
     })();
   }, [tid]);
-
-  // proxy to track selection from Stage
-  const onStageChange = (next: BoxNode[]) => {
-    setBoxes(next);
-    if (selectedId && !next.find((b) => b.id === selectedId))
-      setSelectedId(null);
-  };
 
   const addBox = () => {
     setBoxes((b) => [
@@ -68,7 +64,6 @@ export default function Designer() {
         h_mm: 12,
         font_size: 12,
         align: "left",
-        // ✅ init date fields
         date_format: null,
         date_digit_index: null,
       },
@@ -76,17 +71,12 @@ export default function Designer() {
   };
 
   const duplicate = () => {
-    if (!selectedId) return;
-    const src = boxes.find((b) => b.id === selectedId);
-    if (!src) return;
+    // Let the stage handle selection & properties; just duplicate the last box
+    if (!boxes.length) return;
+    const src = boxes[boxes.length - 1];
     setBoxes((b) => [
       ...b,
-      {
-        ...src,
-        id: uid(),
-        x_mm: src.x_mm + 5,
-        y_mm: src.y_mm + 5,
-      },
+      { ...src, id: uid(), x_mm: src.x_mm + 5, y_mm: src.y_mm + 5 },
     ]);
   };
 
@@ -115,25 +105,12 @@ export default function Designer() {
         rotation: b.rotation ?? 0,
         locked: b.locked ? 1 : 0,
         z_index: idx,
-        // ✅ persist date fields
         date_format: b.date_format ?? null,
         date_digit_index:
           typeof b.date_digit_index === "number" ? b.date_digit_index : null,
       }))
     );
     alert("Saved!");
-  };
-
-  const zoomPct = useMemo(() => Math.round(zoom * 100), [zoom]);
-  const selected = selectedId
-    ? (boxes.find((b) => b.id === selectedId) ?? null)
-    : null;
-
-  const onPatch = (patch: Partial<BoxNode>) => {
-    if (!selectedId) return;
-    setBoxes((bs) =>
-      bs.map((b) => (b.id === selectedId ? { ...b, ...patch } : b))
-    );
   };
 
   return (
@@ -146,11 +123,11 @@ export default function Designer() {
               <span className="text-sm text-gray-600">Zoom</span>
               <input
                 type="range"
-                min={0.25}
-                max={4}
-                step={0.05}
-                value={zoom}
-                onChange={(e) => setZoom(parseFloat(e.target.value))}
+                min={10}
+                max={100}
+                step={5}
+                value={zoomPct}
+                onChange={(e) => setZoomPct(Number(e.target.value))}
               />
               <span className="text-sm w-10 text-right">{zoomPct}%</span>
             </div>
@@ -184,20 +161,17 @@ export default function Designer() {
           </button>
         </div>
 
-        <div className="flex">
-          <div className="flex-1 pr-4" onClick={() => setSelectedId(null)}>
-            <DesignerStage
-              dpi={dpi}
-              paperWidthMm={paperWidthMm}
-              paperHeightMm={paperHeightMm}
-              zoom={zoom}
-              boxes={boxes}
-              onChange={(next) => setBoxes(next)}
-            />
-          </div>
-
-          <PropertiesPanel selected={selected} onPatch={onPatch} />
-        </div>
+        {/* Use DesignerStage with its own built-in Properties panel.
+            Removing the extra <PropertiesPanel /> avoids duplication. */}
+        <DesignerStage
+          dpi={dpi}
+          paperWidthMm={paperWidthMm}
+          paperHeightMm={paperHeightMm}
+          zoom={zoom}
+          boxes={boxes}
+          onChange={setBoxes}
+          // hideSidePanel // <- leave commented so the internal panel is visible
+        />
       </main>
     </div>
   );

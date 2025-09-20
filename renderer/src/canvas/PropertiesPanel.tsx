@@ -27,6 +27,7 @@ export default function PropertiesPanel({ selected, onPatch }: Props) {
   }
 
   const isDate = selected.mapped_field === Field.Date;
+  const isAmountWords = selected.mapped_field === Field.AmountWords;
 
   return (
     <aside className="w-72 border-l p-4 space-y-3 text-sm">
@@ -60,6 +61,21 @@ export default function PropertiesPanel({ selected, onPatch }: Props) {
           ))}
         </select>
       </label>
+
+      {/* Amount (words) helper */}
+      {isAmountWords && (
+        <div className="rounded-md border p-2 bg-blue-50/40">
+          <div className="text-gray-700 font-medium mb-1">
+            Multi-line amount
+          </div>
+          <p className="text-xs text-gray-600">
+            Create two (or more) boxes mapped to <b>Amount (words)</b>. The text
+            will automatically flow into the next Amount box in{" "}
+            <i>top→bottom</i>, then
+            <i> left→right</i> order during preview/print.
+          </p>
+        </div>
+      )}
 
       {/* Extra controls when mapping Date */}
       {isDate && (

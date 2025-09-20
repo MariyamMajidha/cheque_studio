@@ -1,14 +1,12 @@
-// path: renderer/src/canvas/DesignerStage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Stage, Layer, Rect, Transformer } from "react-konva";
+import { Stage, Layer, Rect, Transformer, Text as KText } from "react-konva";
 import { mmToPx } from "../lib/units";
-import type { Field } from "../../../shared/constants";
+import { Field } from "../../../shared/constants";
 import PropertiesPanel from "./PropertiesPanel";
 
 export type BoxNode = {
   id: string;
   label: string;
-  // align with IPC schema (allows '', null)
   mapped_field?: Field | "" | null;
 
   x_mm: number;
@@ -20,7 +18,6 @@ export type BoxNode = {
   locked?: boolean;
   font_size?: number;
 
-  // ✅ keep date fields in node state and make digit index nullable
   date_format?: string | null;
   date_digit_index?: number | null;
 
@@ -34,6 +31,9 @@ type Props = {
   zoom: number;
   boxes: BoxNode[];
   onChange(boxes: BoxNode[]): void;
+
+  /** NEW: hide the built-in Properties side panel (use this if your page renders its own). */
+  hideSidePanel?: boolean;
 };
 
 export default function DesignerStage({
@@ -43,6 +43,7 @@ export default function DesignerStage({
   zoom,
   boxes,
   onChange,
+  hideSidePanel = false,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const trRef = useRef<any>(null);
@@ -54,7 +55,17 @@ export default function DesignerStage({
     };
   }, [paperWidthMm, paperHeightMm, dpi, zoom]);
 
-  // focus transformer on selection
+  // Amount (words) order map (top→bottom then left→right)
+  const awOrder = useMemo(() => {
+    const aw = boxes
+      .filter((b) => b.mapped_field === (Field as any).AmountWords)
+      .slice()
+      .sort((a, b) => a.y_mm - b.y_mm || a.x_mm - b.x_mm);
+    const map = new Map<string, number>();
+    aw.forEach((b, i) => map.set(b.id, i + 1));
+    return map;
+  }, [boxes]);
+
   useEffect(() => {
     const tr = trRef.current;
     if (!tr) return;
@@ -68,7 +79,6 @@ export default function DesignerStage({
     }
   }, [selectedId, boxes]);
 
-  // keyboard delete
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.key === "Backspace" || e.key === "Delete") && selectedId) {
@@ -84,16 +94,7 @@ export default function DesignerStage({
 
   const patchSelected = (patch: Partial<BoxNode>) => {
     if (!selectedId) return;
-    onChange(
-      boxes.map((b) =>
-        b.id === selectedId
-          ? {
-              ...b,
-              ...patch,
-            }
-          : b
-      )
-    );
+    onChange(boxes.map((b) => (b.id === selectedId ? { ...b, ...patch } : b)));
   };
 
   return (
@@ -105,7 +106,6 @@ export default function DesignerStage({
           scale={{ x: zoom, y: zoom }}
           className="bg-[repeating-linear-gradient(0deg,transparent,transparent_19px,#f3f4f6_20px),repeating-linear-gradient(90deg,transparent,transparent_19px,#f3f4f6_20px)]"
           onMouseDown={(e) => {
-            // deselect when clicking empty
             const clickedEmpty = e.target === e.target.getStage();
             if (clickedEmpty) setSelectedId(null);
           }}
@@ -126,59 +126,72 @@ export default function DesignerStage({
               const y = mmToPx(b.y_mm, dpi);
               const w = mmToPx(b.w_mm, dpi);
               const h = mmToPx(b.h_mm, dpi);
+              const badge = awOrder.get(b.id); // 1,2,...
+
               return (
-                <Rect
-                  key={b.id}
-                  id={b.id}
-                  x={x}
-                  y={y}
-                  width={w}
-                  height={h}
-                  rotation={b.rotation || 0}
-                  fill="rgba(37,99,235,0.06)"
-                  stroke={selectedId === b.id ? "#2563eb" : "#9ca3af"}
-                  dash={selectedId === b.id ? [4, 4] : []}
-                  draggable={!b.locked}
-                  onClick={() => setSelectedId(b.id)}
-                  onDragEnd={(e) => {
-                    const nx = e.target.x();
-                    const ny = e.target.y();
-                    onChange(
-                      boxes.map((bb) =>
-                        bb.id === b.id
-                          ? {
-                              ...bb,
-                              x_mm: +(nx / (dpi / 25.4)).toFixed(2),
-                              y_mm: +(ny / (dpi / 25.4)).toFixed(2),
-                            }
-                          : bb
-                      )
-                    );
-                  }}
-                  onTransformEnd={(e) => {
-                    const node = e.target;
-                    const scaleX = node.scaleX();
-                    const scaleY = node.scaleY();
-                    node.scaleX(1);
-                    node.scaleY(1);
-                    const nw = Math.max(4, node.width() * scaleX);
-                    const nh = Math.max(3, node.height() * scaleY);
-                    onChange(
-                      boxes.map((bb) =>
-                        bb.id === b.id
-                          ? {
-                              ...bb,
-                              x_mm: +(node.x() / (dpi / 25.4)).toFixed(2),
-                              y_mm: +(node.y() / (dpi / 25.4)).toFixed(2),
-                              w_mm: +(nw / (dpi / 25.4)).toFixed(2),
-                              h_mm: +(nh / (dpi / 25.4)).toFixed(2),
-                              rotation: node.rotation(),
-                            }
-                          : bb
-                      )
-                    );
-                  }}
-                />
+                <React.Fragment key={b.id}>
+                  <Rect
+                    id={b.id}
+                    x={x}
+                    y={y}
+                    width={w}
+                    height={h}
+                    rotation={b.rotation || 0}
+                    fill="rgba(37,99,235,0.06)"
+                    stroke={selectedId === b.id ? "#2563eb" : "#9ca3af"}
+                    dash={selectedId === b.id ? [4, 4] : []}
+                    draggable={!b.locked}
+                    onClick={() => setSelectedId(b.id)}
+                    onDragEnd={(e) => {
+                      const nx = e.target.x();
+                      const ny = e.target.y();
+                      onChange(
+                        boxes.map((bb) =>
+                          bb.id === b.id
+                            ? {
+                                ...bb,
+                                x_mm: +(nx / (dpi / 25.4)).toFixed(2),
+                                y_mm: +(ny / (dpi / 25.4)).toFixed(2),
+                              }
+                            : bb
+                        )
+                      );
+                    }}
+                    onTransformEnd={(e) => {
+                      const node = e.target;
+                      const scaleX = node.scaleX();
+                      const scaleY = node.scaleY();
+                      node.scaleX(1);
+                      node.scaleY(1);
+                      const nw = Math.max(4, node.width() * scaleX);
+                      const nh = Math.max(3, node.height() * scaleY);
+                      onChange(
+                        boxes.map((bb) =>
+                          bb.id === b.id
+                            ? {
+                                ...bb,
+                                x_mm: +(node.x() / (dpi / 25.4)).toFixed(2),
+                                y_mm: +(node.y() / (dpi / 25.4)).toFixed(2),
+                                w_mm: +(nw / (dpi / 25.4)).toFixed(2),
+                                h_mm: +(nh / (dpi / 25.4)).toFixed(2),
+                                rotation: node.rotation(),
+                              }
+                            : bb
+                        )
+                      );
+                    }}
+                  />
+                  {/* Amount words flow badge */}
+                  {typeof badge === "number" && (
+                    <KText
+                      x={x + 4}
+                      y={y + 2}
+                      text={`AW${badge}`}
+                      fontSize={11}
+                      fill="#334155"
+                    />
+                  )}
+                </React.Fragment>
               );
             })}
 
@@ -197,9 +210,7 @@ export default function DesignerStage({
                 "bottom-center",
               ]}
               boundBoxFunc={(oldBox, newBox) => {
-                if (newBox.width < 10 || newBox.height < 8) {
-                  return oldBox;
-                }
+                if (newBox.width < 10 || newBox.height < 8) return oldBox;
                 return newBox;
               }}
             />
@@ -211,8 +222,10 @@ export default function DesignerStage({
         </p>
       </div>
 
-      {/* Properties side panel */}
-      <PropertiesPanel selected={selectedBox} onPatch={patchSelected} />
+      {/* Only render the built-in Properties panel if not hidden */}
+      {!hideSidePanel && (
+        <PropertiesPanel selected={selectedBox} onPatch={patchSelected} />
+      )}
     </div>
   );
 }
