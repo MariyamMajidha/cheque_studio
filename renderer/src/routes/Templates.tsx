@@ -1,4 +1,3 @@
-// path: renderer/src/routes/Templates.tsx
 import * as React from "react";
 import { useNavigate } from "@tanstack/react-router";
 
@@ -41,6 +40,7 @@ function RowActions({
   onSetBg,
   onClearBg,
   onDelete,
+  onExportOne,
 }: {
   row: TemplateRow;
   busy: boolean;
@@ -49,6 +49,7 @@ function RowActions({
   onSetBg: (id: number) => void;
   onClearBg: (id: number) => void;
   onDelete: (id: number) => void;
+  onExportOne: (id: number) => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement | null>(null);
@@ -84,7 +85,7 @@ function RowActions({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 mt-1 w-44 rounded-md border bg-white shadow-lg z-10 overflow-hidden"
+          className="absolute right-0 mt-1 w-48 rounded-md border bg-white shadow-lg z-10 overflow-hidden"
         >
           <button
             role="menuitem"
@@ -131,6 +132,17 @@ function RowActions({
           <div className="my-1 h-px bg-gray-200" />
           <button
             role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onExportOne(row.id);
+            }}
+            className="w-full text-left px-3 py-2 hover:bg-gray-50"
+          >
+            Export…
+          </button>
+          <div className="my-1 h-px bg-gray-200" />
+          <button
+            role="menuitem"
             disabled={busy}
             onClick={() => {
               setOpen(false);
@@ -152,11 +164,26 @@ export default function Templates() {
   const [busyId, setBusyId] = React.useState<number | null>(null);
   const [editRow, setEditRow] = React.useState<TemplateRow | null>(null);
 
+  // selection for bulk export
+  const [selected, setSelected] = React.useState<Set<number>>(new Set());
+  const toggle = (id: number) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  const allChecked = rows.length > 0 && selected.size === rows.length;
+  const someChecked = selected.size > 0 && selected.size < rows.length;
+  const toggleAll = () =>
+    setSelected((s) =>
+      s.size === rows.length ? new Set() : new Set(rows.map((r) => r.id))
+    );
+
   const load = React.useCallback(async () => {
     const list = await window.api.templates.list();
     setRows(list);
+    setSelected(new Set());
   }, []);
-
   React.useEffect(() => {
     load();
   }, [load]);
@@ -207,21 +234,68 @@ export default function Templates() {
     await load();
   };
 
+  // bulk import/export
+  const onImportMany = async () => {
+    const r = await window.api.templates.importMany();
+    if (r?.ok) {
+      await load();
+      alert(`Imported ${r.imported} template(s).`);
+    }
+  };
+  const onExportSelected = async () => {
+    const ids = [...selected];
+    if (!ids.length) return;
+    const r = await window.api.templates.exportMany(ids);
+    if (r?.ok) alert(`Exported ${r.exported} template(s).`);
+  };
+  const onExportOne = async (id: number) => {
+    const r = await window.api.templates.exportMany([id]);
+    if (r?.ok) alert(`Exported 1 template.`);
+  };
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-semibold">Templates</h2>
-        <button
-          onClick={onNew}
-          className="px-3 py-2 rounded bg-blue-600 text-white"
-        >
-          New
-        </button>
+        <div className="flex gap-2">
+          <button onClick={onImportMany} className="px-3 py-2 rounded border">
+            Import…
+          </button>
+          <button
+            onClick={onExportSelected}
+            disabled={!selected.size}
+            className="px-3 py-2 rounded border disabled:opacity-50"
+            title={
+              !selected.size
+                ? "Select at least one row"
+                : "Export selected templates"
+            }
+          >
+            Export selected…
+          </button>
+          <button
+            onClick={onNew}
+            className="px-3 py-2 rounded bg-blue-600 text-white"
+          >
+            New
+          </button>
+        </div>
       </div>
 
       <table className="w-full text-sm">
         <thead>
           <tr className="text-slate-500">
+            <th className="text-left py-2 w-8">
+              {/* tri-state checkbox */}
+              <input
+                type="checkbox"
+                checked={allChecked}
+                ref={(el) => {
+                  if (el) el.indeterminate = someChecked;
+                }}
+                onChange={toggleAll}
+              />
+            </th>
             <th className="text-left py-2">Name</th>
             <th className="text-left">Size (mm)</th>
             <th className="text-left">DPI</th>
@@ -235,6 +309,14 @@ export default function Templates() {
             const isEditing = editRow?.id === r.id;
             return (
               <tr key={r.id} className="border-t">
+                <td className="py-2">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(r.id)}
+                    onChange={() => toggle(r.id)}
+                  />
+                </td>
+
                 <td className="py-2">
                   {isEditing ? (
                     <input
@@ -299,7 +381,6 @@ export default function Templates() {
                 <td>
                   <BgThumb id={r.id} hasPath={!!r.background_path} />
                 </td>
-
                 <td>{r.updated_at?.replace("T", " ").slice(0, 19) ?? ""}</td>
 
                 <td className="py-2">
@@ -327,6 +408,7 @@ export default function Templates() {
                       onSetBg={onSetBg}
                       onClearBg={onClearBg}
                       onDelete={onDelete}
+                      onExportOne={onExportOne}
                     />
                   )}
                 </td>
@@ -335,7 +417,7 @@ export default function Templates() {
           })}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={6} className="py-10 text-center text-slate-500">
+              <td colSpan={7} className="py-10 text-center text-slate-500">
                 No templates yet. Click <b>New</b> to create one.
               </td>
             </tr>

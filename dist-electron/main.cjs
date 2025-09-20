@@ -279,6 +279,133 @@ function guessMime(p) {
   if (ext === ".webp") return "image/webp";
   return "image/png";
 }
+function extFromMime(m) {
+  if (m === "image/jpeg") return ".jpg";
+  if (m === "image/webp") return ".webp";
+  if (m === "image/png") return ".png";
+  return ".png";
+}
+function safeName(name) {
+  return (name || "template").replace(/[^\w\-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+}
+async function buildTemplateExportPayload(id) {
+  const db2 = getDb();
+  const tpl = db2.prepare(
+    `SELECT id, name, width_mm, height_mm, dpi, orientation, margin_mm, background_path
+         FROM templates WHERE id = ?`
+  ).get(id);
+  if (!tpl) throw new Error("Template not found");
+  const boxes = db2.prepare(
+    `SELECT label, mapped_field, x_mm, y_mm, w_mm, h_mm,
+              font_family, font_size, bold, italic, align, uppercase,
+              letter_spacing, line_height, color, rotation, locked, z_index,
+              date_format, date_digit_index
+         FROM template_boxes
+        WHERE template_id = ?
+        ORDER BY z_index ASC, id ASC`
+  ).all(id);
+  let background = null;
+  if (tpl.background_path && import_node_fs2.default.existsSync(tpl.background_path)) {
+    const mime = guessMime(tpl.background_path);
+    const data = (await import_promises.default.readFile(tpl.background_path)).toString("base64");
+    background = {
+      filename: import_node_path2.default.basename(tpl.background_path),
+      mime,
+      data
+    };
+  }
+  return {
+    _kind: "cheque-template",
+    version: 1,
+    template: {
+      name: tpl.name,
+      width_mm: tpl.width_mm,
+      height_mm: tpl.height_mm,
+      dpi: tpl.dpi,
+      orientation: tpl.orientation,
+      margin_mm: tpl.margin_mm
+    },
+    background,
+    boxes
+  };
+}
+async function importTemplatePayload(payload) {
+  const db2 = getDb();
+  if (!payload || payload._kind !== "cheque-template" || !payload.template) {
+    throw new Error("Not a template export");
+  }
+  const baseName = String(payload.template.name || "Imported Template");
+  let name = baseName;
+  let n = 1;
+  while (db2.prepare("SELECT 1 FROM templates WHERE name = ? LIMIT 1").get(name)) {
+    name = `${baseName} (${++n})`;
+  }
+  const info = db2.prepare(
+    `INSERT INTO templates
+         (name, width_mm, height_mm, dpi, orientation, margin_mm, background_path, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, datetime('now'))`
+  ).run(
+    name,
+    Number(payload.template.width_mm) || 210,
+    Number(payload.template.height_mm) || 99,
+    Number(payload.template.dpi) || 300,
+    String(payload.template.orientation || "Landscape"),
+    Number(payload.template.margin_mm) || 5
+  );
+  const newId = Number(info.lastInsertRowid);
+  if (payload.background?.data && payload.background?.mime) {
+    const dir = import_node_path2.default.join(import_electron3.app.getPath("userData"), "backgrounds");
+    await import_promises.default.mkdir(dir, { recursive: true });
+    const ext = extFromMime(String(payload.background.mime));
+    const dest = import_node_path2.default.join(dir, `template-${newId}${ext}`);
+    await import_promises.default.writeFile(dest, Buffer.from(String(payload.background.data), "base64"));
+    db2.prepare(
+      `UPDATE templates SET background_path = ?, updated_at = datetime('now') WHERE id = ?`
+    ).run(dest, newId);
+  }
+  const insertBox = db2.prepare(
+    `INSERT INTO template_boxes
+       (template_id, label, mapped_field, x_mm, y_mm, w_mm, h_mm,
+        font_family, font_size, bold, italic, align, uppercase,
+        letter_spacing, line_height, color, rotation, locked, z_index,
+        date_format, date_digit_index)
+     VALUES
+       (@template_id, @label, @mapped_field, @x_mm, @y_mm, @w_mm, @h_mm,
+        @font_family, @font_size, @bold, @italic, @align, @uppercase,
+        @letter_spacing, @line_height, @color, @rotation, @locked, @z_index,
+        @date_format, @date_digit_index)`
+  );
+  const rows = Array.isArray(payload.boxes) ? payload.boxes : [];
+  const tx = db2.transaction((rs) => {
+    rs.forEach((b, idx) => {
+      insertBox.run({
+        template_id: newId,
+        label: b.label ?? "Field",
+        mapped_field: b.mapped_field ?? null,
+        x_mm: Number(b.x_mm) || 0,
+        y_mm: Number(b.y_mm) || 0,
+        w_mm: Number(b.w_mm) || 10,
+        h_mm: Number(b.h_mm) || 10,
+        font_family: b.font_family ?? null,
+        font_size: Number(b.font_size) || 12,
+        bold: b.bold ? 1 : 0,
+        italic: b.italic ? 1 : 0,
+        align: b.align ?? "left",
+        uppercase: b.uppercase ? 1 : 0,
+        letter_spacing: b.letter_spacing ?? null,
+        line_height: b.line_height ?? null,
+        color: b.color ?? "#000000",
+        rotation: Number(b.rotation) || 0,
+        locked: b.locked ? 1 : 0,
+        z_index: Number(b.z_index ?? idx) || idx,
+        date_format: b.date_format ?? null,
+        date_digit_index: typeof b.date_digit_index === "number" ? b.date_digit_index : null
+      });
+    });
+  });
+  tx(rows);
+  return { id: newId, name };
+}
 function registerTemplateIpc() {
   if (registered) return;
   registered = true;
@@ -290,6 +417,8 @@ function registerTemplateIpc() {
   import_electron3.ipcMain.removeHandler("templates:pickBackground");
   import_electron3.ipcMain.removeHandler("templates:clearBackground");
   import_electron3.ipcMain.removeHandler("templates:getBackgroundDataUrl");
+  import_electron3.ipcMain.removeHandler("templates:exportMany");
+  import_electron3.ipcMain.removeHandler("templates:importMany");
   import_electron3.ipcMain.handle("templates:list", () => {
     const db2 = getDb();
     return db2.prepare(
@@ -366,9 +495,7 @@ function registerTemplateIpc() {
       properties: ["openFile"],
       filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }]
     });
-    if (!filePaths || filePaths.length === 0) {
-      return { ok: false };
-    }
+    if (!filePaths || filePaths.length === 0) return { ok: false };
     const src = filePaths[0];
     const dir = import_node_path2.default.join(import_electron3.app.getPath("userData"), "backgrounds");
     await import_promises.default.mkdir(dir, { recursive: true });
@@ -409,6 +536,58 @@ function registerTemplateIpc() {
     const mime = guessMime(p);
     const dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
     return { ok: true, dataUrl };
+  });
+  import_electron3.ipcMain.handle("templates:exportMany", async (_evt, ids) => {
+    const dirPaths = import_electron3.dialog.showOpenDialogSync({
+      title: "Choose folder to export templates",
+      properties: ["openDirectory", "createDirectory"]
+    });
+    if (!dirPaths || dirPaths.length === 0) {
+      return { ok: false, exported: 0 };
+    }
+    const dir = dirPaths[0];
+    let count = 0;
+    for (const id of ids || []) {
+      try {
+        const payload = await buildTemplateExportPayload(Number(id));
+        const fname = `${safeName(payload.template.name)}.cps.json`;
+        await import_promises.default.writeFile(import_node_path2.default.join(dir, fname), JSON.stringify(payload, null, 2), "utf8");
+        count++;
+      } catch {
+      }
+    }
+    return { ok: count > 0, exported: count, dir };
+  });
+  import_electron3.ipcMain.handle("templates:importMany", async () => {
+    const files = import_electron3.dialog.showOpenDialogSync({
+      title: "Import templates",
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "Template JSON", extensions: ["json"] }]
+    });
+    if (!files || files.length === 0) {
+      return { ok: false, imported: 0 };
+    }
+    let imported = 0;
+    const created = [];
+    for (const file of files) {
+      try {
+        const raw = await import_promises.default.readFile(file, "utf8");
+        const data = JSON.parse(raw);
+        if (data && Array.isArray(data.items)) {
+          for (const item of data.items) {
+            const res = await importTemplatePayload(item);
+            created.push(res);
+            imported++;
+          }
+        } else {
+          const res = await importTemplatePayload(data);
+          created.push(res);
+          imported++;
+        }
+      } catch {
+      }
+    }
+    return { ok: imported > 0, imported, created };
   });
 }
 

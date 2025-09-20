@@ -1,4 +1,3 @@
-// path: electron/preload.ts
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   BoxRow,
@@ -27,6 +26,14 @@ type Api = {
     pickBackground(id: number): Promise<{ ok: boolean }>;
     clearBackground(id: number): Promise<{ ok: boolean }>;
     getBackgroundDataUrl(id: number): Promise<{ ok: boolean; dataUrl: string | null }>;
+
+    // NEW bulk import/export
+    exportMany(ids: number[]): Promise<{ ok: boolean; exported: number; dir?: string }>;
+    importMany(): Promise<{
+      ok: boolean;
+      imported: number;
+      created?: Array<{ id: number; name: string }>;
+    }>;
   };
 
   boxes: {
@@ -63,7 +70,6 @@ type Api = {
     run(args?: PrintRunArgs): Promise<void>;
     onPayload(cb: (data: any) => void): () => void;
     ready(): void;
-    /** still exposed if you want to call it directly */
     runCurrent(): void;
   };
 };
@@ -75,9 +81,13 @@ const api: Api = {
     create: (payload) => ipcRenderer.invoke('templates:create', payload),
     update: (id, patch) => ipcRenderer.invoke('templates:update', id, patch),
     delete: (id) => ipcRenderer.invoke('templates:delete', id),
+
     pickBackground: (id) => ipcRenderer.invoke('templates:pickBackground', id),
     clearBackground: (id) => ipcRenderer.invoke('templates:clearBackground', id),
-    getBackgroundDataUrl: (id) => ipcRenderer.invoke('templates:getBackgroundDataUrl', id)
+    getBackgroundDataUrl: (id) => ipcRenderer.invoke('templates:getBackgroundDataUrl', id),
+
+    exportMany: (ids) => ipcRenderer.invoke('templates:exportMany', ids),
+    importMany: () => ipcRenderer.invoke('templates:importMany')
   },
 
   boxes: {
@@ -96,16 +106,11 @@ const api: Api = {
 
   print: {
     preview: (args: PrintPreviewArgs) => ipcRenderer.invoke('print:preview', args),
-
-    // 👇 key change: optional args that fall back to printing the current preview window
     run: (args?: PrintRunArgs) => {
-      if (args && typeof args === 'object') {
-        return ipcRenderer.invoke('print:run', args);
-      }
+      if (args && typeof args === 'object') return ipcRenderer.invoke('print:run', args);
       ipcRenderer.send('print:run-current');
       return Promise.resolve();
     },
-
     onPayload: (cb: (p: any) => void) => {
       const h = (_e: any, payload: any) => cb(payload);
       ipcRenderer.on('print:payload', h);

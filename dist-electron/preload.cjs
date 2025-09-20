@@ -26,7 +26,9 @@ var api = {
     delete: (id) => import_electron.ipcRenderer.invoke("templates:delete", id),
     pickBackground: (id) => import_electron.ipcRenderer.invoke("templates:pickBackground", id),
     clearBackground: (id) => import_electron.ipcRenderer.invoke("templates:clearBackground", id),
-    getBackgroundDataUrl: (id) => import_electron.ipcRenderer.invoke("templates:getBackgroundDataUrl", id)
+    getBackgroundDataUrl: (id) => import_electron.ipcRenderer.invoke("templates:getBackgroundDataUrl", id),
+    exportMany: (ids) => import_electron.ipcRenderer.invoke("templates:exportMany", ids),
+    importMany: () => import_electron.ipcRenderer.invoke("templates:importMany")
   },
   boxes: {
     list: (templateId) => import_electron.ipcRenderer.invoke("boxes:list", templateId),
@@ -42,11 +44,8 @@ var api = {
   },
   print: {
     preview: (args) => import_electron.ipcRenderer.invoke("print:preview", args),
-    // 👇 key change: optional args that fall back to printing the current preview window
     run: (args) => {
-      if (args && typeof args === "object") {
-        return import_electron.ipcRenderer.invoke("print:run", args);
-      }
+      if (args && typeof args === "object") return import_electron.ipcRenderer.invoke("print:run", args);
       import_electron.ipcRenderer.send("print:run-current");
       return Promise.resolve();
     },
