@@ -1,5 +1,5 @@
 // path: electron/preload.ts
-import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer } from 'electron';
 import type {
   BoxRow,
   TemplateCreate,
@@ -24,7 +24,6 @@ type Api = {
     update(id: number, patch: TemplatePatch): Promise<void | { updated: boolean }>;
     delete(id: number): Promise<void>;
 
-    // NEW
     pickBackground(id: number): Promise<{ ok: boolean }>;
     clearBackground(id: number): Promise<{ ok: boolean }>;
     getBackgroundDataUrl(id: number): Promise<{ ok: boolean; dataUrl: string | null }>;
@@ -60,35 +59,33 @@ type Api = {
 
   print: {
     preview(args: PrintPreviewArgs): Promise<void>;
-    run(args: PrintRunArgs): Promise<void>;
+    /** If args provided -> worker window; if omitted -> print the current preview window */
+    run(args?: PrintRunArgs): Promise<void>;
     onPayload(cb: (data: any) => void): () => void;
     ready(): void;
+    /** still exposed if you want to call it directly */
     runCurrent(): void;
   };
 };
 
 const api: Api = {
-  // -------- Templates --------
   templates: {
     list: () => ipcRenderer.invoke('templates:list'),
     get: (id) => ipcRenderer.invoke('templates:get', id),
     create: (payload) => ipcRenderer.invoke('templates:create', payload),
     update: (id, patch) => ipcRenderer.invoke('templates:update', id, patch),
     delete: (id) => ipcRenderer.invoke('templates:delete', id),
-
     pickBackground: (id) => ipcRenderer.invoke('templates:pickBackground', id),
     clearBackground: (id) => ipcRenderer.invoke('templates:clearBackground', id),
     getBackgroundDataUrl: (id) => ipcRenderer.invoke('templates:getBackgroundDataUrl', id)
   },
 
-  // -------- Boxes --------
   boxes: {
     list: (templateId) => ipcRenderer.invoke('boxes:list', templateId),
     upsertMany: (templateId, boxes) => ipcRenderer.invoke('boxes:upsertMany', templateId, boxes),
     delete: (id) => ipcRenderer.invoke('boxes:delete', id)
   },
 
-  // -------- Cheques --------
   cheques: {
     list: (templateId) => ipcRenderer.invoke('cheques:list', { template_id: templateId }),
     createOne: (payload) => ipcRenderer.invoke('cheques:createOne', payload),
@@ -97,17 +94,23 @@ const api: Api = {
     importExcel: (args) => ipcRenderer.invoke('cheques:importExcel', args)
   },
 
-  // -------- Print --------
   print: {
-    preview: (args) => ipcRenderer.invoke('print:preview', args),
-    run: (args) => ipcRenderer.invoke('print:run', args),
+    preview: (args: PrintPreviewArgs) => ipcRenderer.invoke('print:preview', args),
 
-    onPayload: (cb) => {
-      const handler = (_evt: IpcRendererEvent, data: any) => cb(data);
-      ipcRenderer.on('print:payload', handler);
-      return () => ipcRenderer.removeListener('print:payload', handler);
+    // 👇 key change: optional args that fall back to printing the current preview window
+    run: (args?: PrintRunArgs) => {
+      if (args && typeof args === 'object') {
+        return ipcRenderer.invoke('print:run', args);
+      }
+      ipcRenderer.send('print:run-current');
+      return Promise.resolve();
     },
 
+    onPayload: (cb: (p: any) => void) => {
+      const h = (_e: any, payload: any) => cb(payload);
+      ipcRenderer.on('print:payload', h);
+      return () => ipcRenderer.off('print:payload', h);
+    },
     ready: () => ipcRenderer.send('print:ready'),
     runCurrent: () => ipcRenderer.send('print:run-current')
   }

@@ -65,8 +65,8 @@ export default function PrintPreview() {
   }, [paperPx.w, paperPx.h]);
 
   const doPrint = async () => {
-    // main will print the current sender (this preview window)
-    await window.api.print.run(undefined as any);
+    // prints this preview window (current sender)
+    await window.api.print.run(); // ← no args
   };
 
   return (
