@@ -1,3 +1,4 @@
+// path: renderer/src/canvas/PreviewCanvas.tsx
 import React, { useEffect, useRef } from "react";
 import { Stage, Layer, Rect, Text } from "react-konva";
 import { mmToPx } from "../lib/units";
@@ -49,10 +50,8 @@ function formatDateFull(dateStr: string, fmt: string = "DDMMYYYY"): string {
       return `${DD}${MM}${YYYY}`;
   }
 }
-
-function formatDateDigits(dateStr: string, order?: string): string {
-  return formatDateFull(dateStr, order).replace(/\D/g, "");
-}
+const formatDateDigits = (s: string, order?: string) =>
+  formatDateFull(s, order).replace(/\D/g, "");
 
 /** Measure text width (px) with letter-spacing taken into account. */
 function makeMeasurer() {
@@ -69,13 +68,16 @@ function makeMeasurer() {
     }
   ) => {
     const { bold, italic, size, family, letterSpacing = 0 } = opts;
-    ctx.font = `${italic ? "italic " : ""}${bold ? "bold " : ""}${size}px ${family || "system-ui,sans-serif"}`;
+    ctx.font = `${italic ? "italic " : ""}${bold ? "bold " : ""}${size}px ${
+      family || "system-ui,sans-serif"
+    }`;
     const base = ctx.measureText(text).width;
     const ls = Number(letterSpacing) || 0;
     return base + Math.max(0, text.length - 1) * ls;
   };
 }
 
+/** Break a long string into a single line that fits the box width; return [line, rest]. */
 function takeLineFitting(
   text: string,
   widthPx: number,
@@ -103,15 +105,11 @@ function takeLineFitting(
       break;
     }
   }
-
-  const rest = words.slice(i).join(" ");
-  return [line, rest];
+  return [line, words.slice(i).join(" ")];
 }
 
-function computeAmountFlows(
-  template: any,
-  cheque: Cheque
-): Record<string, string> {
+/** Compute text for each AmountWords box (order: top→bottom then left→right). */
+function computeAmountFlows(template: any, cheque: Cheque, dpi: number) {
   const boxes: Box[] = (template._boxes ?? []).filter(
     (b: Box) => b.mapped_field === Field.AmountWords
   );
@@ -124,7 +122,7 @@ function computeAmountFlows(
   let remaining = (cheque.amount_words || "").trim();
 
   for (const b of sorted) {
-    const widthPx = mmToPx(b.w_mm, template.dpi);
+    const widthPx = mmToPx(b.w_mm, dpi);
     const meas = makeMeasurer();
     const measure = (s: string) =>
       meas(s, {
@@ -181,8 +179,8 @@ export default function PreviewCanvas({
   template,
   cheques,
   offsets,
-  onBitmapChange, // NEW
-  captureTick, // NEW
+  onBitmapChange,
+  captureTick,
 }: {
   template: any;
   cheques: any[];
@@ -192,29 +190,38 @@ export default function PreviewCanvas({
 }) {
   const stageRef = useRef<any>(null);
 
-  const w = mmToPx(template.width_mm, template.dpi);
-  const h = mmToPx(template.height_mm, template.dpi);
-  const ox = mmToPx(offsets.x, template.dpi);
-  const oy = mmToPx(offsets.y, template.dpi);
+  // Use the template DPI everywhere for layout (so alignment matches designer)
+  const dpi = Number(template?.dpi) || 300;
+
+  const w = mmToPx(template.width_mm, dpi);
+  const h = mmToPx(template.height_mm, dpi);
+  const ox = mmToPx(offsets.x, dpi);
+  const oy = mmToPx(offsets.y, dpi);
 
   const cheque = cheques?.[0];
-  const amountFlows = cheque ? computeAmountFlows(template, cheque) : {};
+  const amountFlows = cheque ? computeAmountFlows(template, cheque, dpi) : {};
 
-  // Capture a bitmap for printing whenever content changes or when asked.
+  // Capture a higher-resolution bitmap for printing, but keep layout DPI unchanged.
   useEffect(() => {
     if (!onBitmapChange) return;
-    // wait two frames so Konva paints
+    // Scale export so 100-DPI templates become ~300-DPI bitmaps, etc.
+    const pixelRatio = Math.max(1, 300 / dpi);
+
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         try {
-          const url = stageRef.current?.toDataURL({ pixelRatio: 1 }) ?? null;
+          const url =
+            stageRef.current?.toDataURL({
+              pixelRatio, // hi-res export; layout stays the same
+              mimeType: "image/png",
+            }) ?? null;
           onBitmapChange(url);
         } catch {
           onBitmapChange(null);
         }
       })
     );
-  }, [onBitmapChange, template, cheques, offsets, captureTick]);
+  }, [onBitmapChange, template, cheques, offsets, captureTick, dpi]);
 
   return (
     <Stage ref={stageRef} width={w} height={h}>
@@ -224,10 +231,10 @@ export default function PreviewCanvas({
           (template._boxes ?? []).map((b: any) => (
             <Text
               key={b.id}
-              x={mmToPx(b.x_mm, template.dpi) + ox}
-              y={mmToPx(b.y_mm, template.dpi) + oy}
-              width={mmToPx(b.w_mm, template.dpi)}
-              height={mmToPx(b.h_mm, template.dpi)}
+              x={mmToPx(b.x_mm, dpi) + ox}
+              y={mmToPx(b.y_mm, dpi) + oy}
+              width={mmToPx(b.w_mm, dpi)}
+              height={mmToPx(b.h_mm, dpi)}
               text={resolveBoxText(b, cheque, b.label, amountFlows)}
               align={b.align || "left"}
               fontFamily={b.font_family || undefined}
