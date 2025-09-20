@@ -23,7 +23,12 @@ export default function PrintPreview() {
   const [data, setData] = React.useState<PreviewPayload | null>(null);
   const [zoom, setZoom] = React.useState(1); // screen-only zoom (reset for print)
 
-  // Receive payload from main
+  // Bitmap we’ll print
+  const [printBitmap, setPrintBitmap] = React.useState<string | null>(null);
+  // Ask the canvas to re-capture before printing
+  const [captureTick, setCaptureTick] = React.useState(0);
+
+  // ---- Receive payload from main ----
   React.useEffect(() => {
     const off = window.api.print.onPayload((p: PreviewPayload) => setData(p));
     window.api.print.ready();
@@ -44,9 +49,10 @@ export default function PrintPreview() {
       off();
       clearTimeout(t);
     };
-  }, []); // eslint-disable-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Compute a preview zoom that fits the paper on screen (but never used for print)
+  // ---- Paper size in px (screen & print) ----
   const paperPx = React.useMemo(() => {
     if (!data?.template) return { w: 0, h: 0 };
     const { width_mm, height_mm, dpi } = data.template;
@@ -54,23 +60,57 @@ export default function PrintPreview() {
     return { w: mmToPx(width_mm), h: mmToPx(height_mm) };
   }, [data?.template]);
 
+  // Fit paper on screen (never upscale)
   React.useEffect(() => {
     if (!paperPx.w || !paperPx.h) return;
-    // leave a bit of padding around paper
     const pad = 48;
     const availW = Math.max(320, window.innerWidth - pad * 2);
     const availH = Math.max(240, window.innerHeight - pad * 2);
-    const z = Math.min(availW / paperPx.w, availH / paperPx.h, 1); // never upscale in preview
+    const z = Math.min(availW / paperPx.w, availH / paperPx.h, 1);
     setZoom(z);
   }, [paperPx.w, paperPx.h]);
 
+  // ---- Print-only DOM portal (outside our layout) ----
+  React.useEffect(() => {
+    let holder = document.getElementById("print-only");
+    if (!holder) {
+      holder = document.createElement("div");
+      holder.id = "print-only";
+      holder.style.display = "none"; // hidden on screen
+      document.body.appendChild(holder);
+    }
+    // ensure it contains an <img>
+    let img = holder.querySelector("img") as HTMLImageElement | null;
+    if (!img) {
+      img = document.createElement("img");
+      img.id = "print-only-img";
+      img.style.display = "none";
+      img.alt = "";
+      holder.appendChild(img);
+    }
+    // keep size in sync
+    img.style.width = `${paperPx.w}px`;
+    img.style.height = `${paperPx.h}px`;
+    // keep bitmap in sync
+    if (printBitmap) img.src = printBitmap;
+    return () => {
+      // don’t remove between renders; we keep the node attached to body
+    };
+  }, [printBitmap, paperPx.w, paperPx.h]);
+
   const doPrint = async () => {
-    // prints this preview window (current sender)
-    await window.api.print.run(); // ← no args
+    // 1) ask the Konva stage to capture to PNG
+    setCaptureTick((t) => t + 1);
+    // 2) wait a moment for the bitmap to refresh
+    await new Promise((r) => setTimeout(r, 80));
+    await new Promise(requestAnimationFrame);
+    // 3) trigger OS print of THIS window
+    window.api.print.runCurrent();
   };
 
   return (
     <div
+      id="screen-shell"
       style={{
         background: "#0f172a", // slate-900-ish
         minHeight: "100vh",
@@ -124,7 +164,7 @@ export default function PrintPreview() {
         </div>
       </div>
 
-      {/* Paper mat */}
+      {/* Paper mat (screen only) */}
       <div
         style={{
           display: "grid",
@@ -145,19 +185,24 @@ export default function PrintPreview() {
             background: "white",
           }}
         >
-          <React.Suspense fallback={null}>
-            {data && (
-              <PreviewCanvas
-                template={data.template}
-                cheques={data.cheques}
-                offsets={data.offsets ?? { x: 0, y: 0 }}
-              />
-            )}
-          </React.Suspense>
+          {/* Live interactive canvas for screen */}
+          <div id="preview-paper-canvas">
+            <React.Suspense fallback={null}>
+              {data && (
+                <PreviewCanvas
+                  template={data.template}
+                  cheques={data.cheques}
+                  offsets={data.offsets ?? { x: 0, y: 0 }}
+                  onBitmapChange={setPrintBitmap} // capture PNG
+                  captureTick={captureTick} // recapture before print
+                />
+              )}
+            </React.Suspense>
+          </div>
         </div>
       </div>
 
-      {/* Print-only rules */}
+      {/* Print stylesheet: hide UI and show only the top-level <img/> in #print-only */}
       <style>{`
         @media print {
           html, body {
@@ -167,19 +212,21 @@ export default function PrintPreview() {
             print-color-adjust: exact;
             background: white !important;
           }
-          .preview-toolbar { display: none !important; }
-          #preview-paper {
-            /* IMPORTANT: 1:1 scale for print */
-            transform: none !important;
-            box-shadow: none !important;
-            border-radius: 0 !important;
+
+          /* Hide all screen UI completely */
+          #screen-shell { display: none !important; }
+
+          /* Show the print-only portal (attached to <body>) */
+          #print-only { 
+            display: block !important; 
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          #print-only-img {
+            display: block !important;
             width: ${paperPx.w}px !important;
             height: ${paperPx.h}px !important;
-            margin: 0 !important;
           }
-          /* Only paper should be printable area */
-          body > *:not(#preview-paper):not(.preview-toolbar) { display: none !important; }
-          #preview-paper { display: block !important; }
         }
       `}</style>
     </div>
