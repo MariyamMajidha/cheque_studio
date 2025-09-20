@@ -8,8 +8,29 @@ type TemplateRow = {
   width_mm: number;
   height_mm: number;
   dpi: number;
+  background_path?: string | null;
   updated_at?: string | null;
 };
+
+function BgThumb({ id, hasPath }: { id: number; hasPath: boolean }) {
+  const [src, setSrc] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!hasPath) return setSrc(null);
+      const r = await window.api.templates.getBackgroundDataUrl(id);
+      if (alive) setSrc(r?.dataUrl ?? null);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [id, hasPath]);
+
+  if (!src) return <span className="text-slate-400">—</span>;
+  return (
+    <img src={src} alt="bg" className="w-24 h-12 object-cover border rounded" />
+  );
+}
 
 export default function Templates() {
   const nav = useNavigate();
@@ -30,11 +51,8 @@ export default function Templates() {
     const { id } = await window.api.templates.create();
     nav({ to: "/designer/$templateId", params: { templateId: String(id) } });
   };
-
-  const onEdit = (id: number) => {
+  const onEdit = (id: number) =>
     nav({ to: "/designer/$templateId", params: { templateId: String(id) } });
-  };
-
   const onDelete = async (id: number) => {
     if (!confirm("Delete this template? This will remove its boxes as well."))
       return;
@@ -64,6 +82,16 @@ export default function Templates() {
     }
   };
 
+  const onSetBg = async (id: number) => {
+    await window.api.templates.pickBackground(id);
+    await load();
+  };
+  const onClearBg = async (id: number) => {
+    if (!confirm("Remove background image for this template?")) return;
+    await window.api.templates.clearBackground(id);
+    await load();
+  };
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
@@ -82,8 +110,9 @@ export default function Templates() {
             <th className="text-left py-2">Name</th>
             <th className="text-left">Size (mm)</th>
             <th className="text-left">DPI</th>
+            <th className="text-left">Background</th>
             <th className="text-left">Updated</th>
-            <th className="text-left w-56">Actions</th>
+            <th className="text-left w-[420px]">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -104,6 +133,7 @@ export default function Templates() {
                     r.name
                   )}
                 </td>
+
                 <td>
                   {isEditing ? (
                     <div className="flex gap-1">
@@ -135,6 +165,7 @@ export default function Templates() {
                     `${r.width_mm} × ${r.height_mm}`
                   )}
                 </td>
+
                 <td>
                   {isEditing ? (
                     <input
@@ -149,7 +180,13 @@ export default function Templates() {
                     r.dpi
                   )}
                 </td>
+
+                <td>
+                  <BgThumb id={r.id} hasPath={!!r.background_path} />
+                </td>
+
                 <td>{r.updated_at?.replace("T", " ").slice(0, 19) ?? ""}</td>
+
                 <td className="space-x-2">
                   {isEditing ? (
                     <>
@@ -181,10 +218,22 @@ export default function Templates() {
                         Update
                       </button>
                       <button
+                        onClick={() => onSetBg(r.id)}
+                        className="px-2 py-1 rounded border"
+                      >
+                        Set BG…
+                      </button>
+                      <button
+                        disabled={!r.background_path}
+                        onClick={() => onClearBg(r.id)}
+                        className="px-2 py-1 rounded border disabled:opacity-50"
+                      >
+                        Clear BG
+                      </button>
+                      <button
                         disabled={busyId === r.id}
                         onClick={() => onDelete(r.id)}
                         className="px-2 py-1 rounded border text-red-600 disabled:opacity-50"
-                        title="Delete template"
                       >
                         {busyId === r.id ? "Deleting…" : "Delete"}
                       </button>
@@ -196,7 +245,7 @@ export default function Templates() {
           })}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={5} className="py-10 text-center text-slate-500">
+              <td colSpan={6} className="py-10 text-center text-slate-500">
                 No templates yet. Click <b>New</b> to create one.
               </td>
             </tr>

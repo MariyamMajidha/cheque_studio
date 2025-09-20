@@ -143,6 +143,28 @@ export interface IpcApi {
     create: (payload?: Partial<TemplateCreate>) => Promise<{ id: number }>;
     update: (id: number, patch: TemplatePatch) => Promise<void>;
     delete: (id: number) => Promise<void>;
+    templates: {
+      list: () => Promise<
+        Array<{
+          id: number;
+          name: string;
+          width_mm: number;
+          height_mm: number;
+          dpi: number;
+          updated_at?: string;
+          // optional to read in list views; present in SELECT above:
+          background_path?: string | null;
+        }>
+      >;
+      get: (id: number) => Promise<TemplateRow>;
+      create: (payload?: Partial<TemplateCreate>) => Promise<{ id: number }>;
+      update: (id: number, patch: TemplatePatch) => Promise<void>;
+      delete: (id: number) => Promise<void>;
+
+      // NEW:
+      pickBackground: (id: number) => Promise<{ ok: boolean; path?: string }>;
+      clearBackground: (id: number) => Promise<{ ok: boolean }>;
+    };
   };
   boxes: {
     list: (templateId: number) => Promise<BoxRow[]>;

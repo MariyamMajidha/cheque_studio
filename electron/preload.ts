@@ -13,18 +13,29 @@ import type {
 type Api = {
   templates: {
     list(): Promise<
-      Array<Pick<TemplateRow, 'id' | 'name' | 'width_mm' | 'height_mm' | 'dpi' | 'updated_at'>>
+      Array<
+        Pick<TemplateRow, 'id' | 'name' | 'width_mm' | 'height_mm' | 'dpi' | 'updated_at'> & {
+          background_path?: string | null;
+        }
+      >
     >;
-    get(id: number): Promise<TemplateRow>;
+    get(id: number): Promise<TemplateRow & { background_path?: string | null }>;
     create(payload?: Partial<TemplateCreate>): Promise<{ id: number }>;
-    update(id: number, patch: TemplatePatch): Promise<void>;
+    update(id: number, patch: TemplatePatch): Promise<void | { updated: boolean }>;
     delete(id: number): Promise<void>;
+
+    // NEW
+    pickBackground(id: number): Promise<{ ok: boolean }>;
+    clearBackground(id: number): Promise<{ ok: boolean }>;
+    getBackgroundDataUrl(id: number): Promise<{ ok: boolean; dataUrl: string | null }>;
   };
+
   boxes: {
     list(templateId: number): Promise<BoxRow[]>;
     upsertMany(templateId: number, boxes: BoxRow[]): Promise<void>;
     delete(id: number): Promise<void>;
   };
+
   cheques: {
     list(templateId: number): Promise<
       Array<{
@@ -46,20 +57,12 @@ type Api = {
     delete(id: number): Promise<void>;
     importExcel(args?: any): Promise<{ ok: boolean; imported: number }>;
   };
+
   print: {
-    /** Open preview window; main will send payload after the page signals 'ready'. */
     preview(args: PrintPreviewArgs): Promise<void>;
-    /**
-     * Print:
-     * - If args provided → full background print flow.
-     * - If omitted       → prints the *current* preview window.
-     */
-    run(args?: PrintRunArgs): Promise<void>;
-    /** Subscribe to the payload main sends to the preview window. */
+    run(args: PrintRunArgs): Promise<void>;
     onPayload(cb: (data: any) => void): () => void;
-    /** Let main know the preview page is ready to receive the payload. */
     ready(): void;
-    /** Explicit helper to print the *current* preview window. */
     runCurrent(): void;
   };
 };
@@ -71,7 +74,11 @@ const api: Api = {
     get: (id) => ipcRenderer.invoke('templates:get', id),
     create: (payload) => ipcRenderer.invoke('templates:create', payload),
     update: (id, patch) => ipcRenderer.invoke('templates:update', id, patch),
-    delete: (id) => ipcRenderer.invoke('templates:delete', id)
+    delete: (id) => ipcRenderer.invoke('templates:delete', id),
+
+    pickBackground: (id) => ipcRenderer.invoke('templates:pickBackground', id),
+    clearBackground: (id) => ipcRenderer.invoke('templates:clearBackground', id),
+    getBackgroundDataUrl: (id) => ipcRenderer.invoke('templates:getBackgroundDataUrl', id)
   },
 
   // -------- Boxes --------
@@ -93,13 +100,7 @@ const api: Api = {
   // -------- Print --------
   print: {
     preview: (args) => ipcRenderer.invoke('print:preview', args),
-
-    // If args are present -> full print worker flow; else -> print this (preview) window.
-    run: (args?: PrintRunArgs) => {
-      if (args) return ipcRenderer.invoke('print:run', args);
-      ipcRenderer.send('print:run-current');
-      return Promise.resolve();
-    },
+    run: (args) => ipcRenderer.invoke('print:run', args),
 
     onPayload: (cb) => {
       const handler = (_evt: IpcRendererEvent, data: any) => cb(data);
@@ -108,7 +109,6 @@ const api: Api = {
     },
 
     ready: () => ipcRenderer.send('print:ready'),
-
     runCurrent: () => ipcRenderer.send('print:run-current')
   }
 };

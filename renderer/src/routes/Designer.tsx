@@ -1,8 +1,8 @@
+// path: renderer/src/routes/Designer.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import DesignerStage, { BoxNode } from "../canvas/DesignerStage";
 import { useParams } from "@tanstack/react-router";
 
-const DEFAULT_DPI = 150;
 function uid() {
   return Math.random().toString(36).slice(2, 9);
 }
@@ -11,11 +11,13 @@ export default function Designer() {
   const { templateId } = useParams({ from: "/designer/$templateId" as any });
   const tid = Number(templateId) || 1;
 
-  const [paperWidthMm] = useState(210);
-  const [paperHeightMm] = useState(99);
-  const [dpi] = useState(DEFAULT_DPI);
+  const [paperWidthMm, setPaperWidthMm] = useState(210);
+  const [paperHeightMm, setPaperHeightMm] = useState(99);
+  const [dpi, setDpi] = useState(300);
 
-  // Zoom as a percentage 10–100
+  const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
+  const [bgVisible, setBgVisible] = useState(true);
+
   const [zoomPct, setZoomPct] = useState(100);
   const zoom = useMemo(
     () => Math.max(10, Math.min(100, zoomPct)) / 100,
@@ -24,7 +26,28 @@ export default function Designer() {
 
   const [boxes, setBoxes] = useState<BoxNode[]>([]);
 
-  // Load boxes from DB
+  // Load template meta and background data URL
+  useEffect(() => {
+    (async () => {
+      try {
+        const t = await window.api.templates.get(tid);
+        setPaperWidthMm(t.width_mm);
+        setPaperHeightMm(t.height_mm);
+        setDpi(t.dpi);
+
+        if (t.background_path) {
+          const r = await window.api.templates.getBackgroundDataUrl(tid);
+          setBackgroundUrl(r?.dataUrl ?? null);
+        } else {
+          setBackgroundUrl(null);
+        }
+      } catch (e) {
+        console.error("load template failed", e);
+      }
+    })();
+  }, [tid]);
+
+  // Load boxes
   useEffect(() => {
     (async () => {
       try {
@@ -71,7 +94,6 @@ export default function Designer() {
   };
 
   const duplicate = () => {
-    // Let the stage handle selection & properties; just duplicate the last box
     if (!boxes.length) return;
     const src = boxes[boxes.length - 1];
     setBoxes((b) => [
@@ -113,6 +135,19 @@ export default function Designer() {
     alert("Saved!");
   };
 
+  const onPickBackground = async () => {
+    const r = await window.api.templates.pickBackground(tid);
+    if (r?.ok) {
+      const rb = await window.api.templates.getBackgroundDataUrl(tid);
+      setBackgroundUrl(rb?.dataUrl ?? null);
+    }
+  };
+
+  const onClearBackground = async () => {
+    await window.api.templates.clearBackground(tid);
+    setBackgroundUrl(null);
+  };
+
   return (
     <div className="h-full flex">
       <main className="flex-1 p-6 space-y-4">
@@ -129,7 +164,7 @@ export default function Designer() {
                 value={zoomPct}
                 onChange={(e) => setZoomPct(Number(e.target.value))}
               />
-              <span className="text-sm w-10 text-right">{zoomPct}%</span>
+              <span className="text-sm w-12 text-right">{zoomPct}%</span>
             </div>
             <button
               onClick={save}
@@ -140,7 +175,7 @@ export default function Designer() {
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={addBox}
             className="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
@@ -159,10 +194,31 @@ export default function Designer() {
           >
             Clear
           </button>
+
+          <span className="mx-3 h-5 w-px bg-gray-300" />
+          <button
+            onClick={onPickBackground}
+            className="px-3 py-1 rounded border border-gray-300 hover:bg-gray-50"
+          >
+            Set background…
+          </button>
+          <button
+            onClick={onClearBackground}
+            disabled={!backgroundUrl}
+            className="px-3 py-1 rounded border border-gray-300 disabled:opacity-50 hover:bg-gray-50"
+          >
+            Clear
+          </button>
+          <label className="ml-1 inline-flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={bgVisible}
+              onChange={(e) => setBgVisible(e.target.checked)}
+            />
+            Show background
+          </label>
         </div>
 
-        {/* Use DesignerStage with its own built-in Properties panel.
-            Removing the extra <PropertiesPanel /> avoids duplication. */}
         <DesignerStage
           dpi={dpi}
           paperWidthMm={paperWidthMm}
@@ -170,7 +226,7 @@ export default function Designer() {
           zoom={zoom}
           boxes={boxes}
           onChange={setBoxes}
-          // hideSidePanel // <- leave commented so the internal panel is visible
+          backgroundUrl={bgVisible ? backgroundUrl : null}
         />
       </main>
     </div>

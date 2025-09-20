@@ -24,7 +24,10 @@ var api = {
     get: (id) => import_electron.ipcRenderer.invoke("templates:get", id),
     create: (payload) => import_electron.ipcRenderer.invoke("templates:create", payload),
     update: (id, patch) => import_electron.ipcRenderer.invoke("templates:update", id, patch),
-    delete: (id) => import_electron.ipcRenderer.invoke("templates:delete", id)
+    delete: (id) => import_electron.ipcRenderer.invoke("templates:delete", id),
+    pickBackground: (id) => import_electron.ipcRenderer.invoke("templates:pickBackground", id),
+    clearBackground: (id) => import_electron.ipcRenderer.invoke("templates:clearBackground", id),
+    getBackgroundDataUrl: (id) => import_electron.ipcRenderer.invoke("templates:getBackgroundDataUrl", id)
   },
   // -------- Boxes --------
   boxes: {
@@ -43,12 +46,7 @@ var api = {
   // -------- Print --------
   print: {
     preview: (args) => import_electron.ipcRenderer.invoke("print:preview", args),
-    // If args are present -> full print worker flow; else -> print this (preview) window.
-    run: (args) => {
-      if (args) return import_electron.ipcRenderer.invoke("print:run", args);
-      import_electron.ipcRenderer.send("print:run-current");
-      return Promise.resolve();
-    },
+    run: (args) => import_electron.ipcRenderer.invoke("print:run", args),
     onPayload: (cb) => {
       const handler = (_evt, data) => cb(data);
       import_electron.ipcRenderer.on("print:payload", handler);

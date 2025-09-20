@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Stage, Layer, Rect, Transformer, Text as KText } from "react-konva";
+import {
+  Stage,
+  Layer,
+  Rect,
+  Transformer,
+  Text as KText,
+  Image as KImage,
+} from "react-konva";
 import { mmToPx } from "../lib/units";
 import { Field } from "../../../shared/constants";
 import PropertiesPanel from "./PropertiesPanel";
@@ -32,7 +39,10 @@ type Props = {
   boxes: BoxNode[];
   onChange(boxes: BoxNode[]): void;
 
-  /** NEW: hide the built-in Properties side panel (use this if your page renders its own). */
+  /** Show a scanned cheque as background in the designer only. */
+  backgroundUrl?: string | null;
+
+  /** Hide the built-in side panel (if page renders its own). */
   hideSidePanel?: boolean;
 };
 
@@ -43,17 +53,33 @@ export default function DesignerStage({
   zoom,
   boxes,
   onChange,
+  backgroundUrl,
   hideSidePanel = false,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const trRef = useRef<any>(null);
 
-  const stageSize = useMemo(() => {
-    return {
+  // load background image (if any)
+  const [bgImg, setBgImg] = useState<HTMLImageElement | null>(null);
+  useEffect(() => {
+    if (!backgroundUrl) {
+      setBgImg(null);
+      return;
+    }
+    const img = new window.Image();
+    // allow file://
+    img.onload = () => setBgImg(img);
+    img.onerror = () => setBgImg(null);
+    img.src = backgroundUrl;
+  }, [backgroundUrl]);
+
+  const stageSize = useMemo(
+    () => ({
       width: mmToPx(paperWidthMm, dpi) * zoom,
       height: mmToPx(paperHeightMm, dpi) * zoom,
-    };
-  }, [paperWidthMm, paperHeightMm, dpi, zoom]);
+    }),
+    [paperWidthMm, paperHeightMm, dpi, zoom]
+  );
 
   // Amount (words) order map (top→bottom then left→right)
   const awOrder = useMemo(() => {
@@ -66,6 +92,7 @@ export default function DesignerStage({
     return map;
   }, [boxes]);
 
+  // focus transformer on selection
   useEffect(() => {
     const tr = trRef.current;
     if (!tr) return;
@@ -79,6 +106,7 @@ export default function DesignerStage({
     }
   }, [selectedId, boxes]);
 
+  // keyboard delete
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.key === "Backspace" || e.key === "Delete") && selectedId) {
@@ -97,6 +125,9 @@ export default function DesignerStage({
     onChange(boxes.map((b) => (b.id === selectedId ? { ...b, ...patch } : b)));
   };
 
+  const pageW = mmToPx(paperWidthMm, dpi);
+  const pageH = mmToPx(paperHeightMm, dpi);
+
   return (
     <div className="flex border rounded bg-white shadow-sm">
       <div className="flex-1">
@@ -111,22 +142,35 @@ export default function DesignerStage({
           }}
         >
           <Layer>
-            {/* page border */}
+            {/* 0) Optional scanned cheque background */}
+            {bgImg && (
+              <KImage
+                image={bgImg}
+                x={0}
+                y={0}
+                width={pageW}
+                height={pageH}
+                listening={false} // clicks pass through
+              />
+            )}
+
+            {/* 1) Page border (no fill so background remains visible) */}
             <Rect
               x={0}
               y={0}
-              width={mmToPx(paperWidthMm, dpi)}
-              height={mmToPx(paperHeightMm, dpi)}
+              width={pageW}
+              height={pageH}
               stroke="#e5e7eb"
               strokeWidth={1}
             />
 
+            {/* 2) Boxes */}
             {boxes.map((b) => {
               const x = mmToPx(b.x_mm, dpi);
               const y = mmToPx(b.y_mm, dpi);
               const w = mmToPx(b.w_mm, dpi);
               const h = mmToPx(b.h_mm, dpi);
-              const badge = awOrder.get(b.id); // 1,2,...
+              const badge = awOrder.get(b.id);
 
               return (
                 <React.Fragment key={b.id}>
@@ -181,7 +225,6 @@ export default function DesignerStage({
                       );
                     }}
                   />
-                  {/* Amount words flow badge */}
                   {typeof badge === "number" && (
                     <KText
                       x={x + 4}
@@ -216,15 +259,23 @@ export default function DesignerStage({
             />
           </Layer>
         </Stage>
+
         <p className="text-xs text-gray-500 mt-2">
           Tip: click a box to select, drag to move, resize with handles, rotate
           with the transformer, press Delete to remove.
         </p>
       </div>
 
-      {/* Only render the built-in Properties panel if not hidden */}
       {!hideSidePanel && (
-        <PropertiesPanel selected={selectedBox} onPatch={patchSelected} />
+        <PropertiesPanel
+          selected={boxes.find((b) => b.id === selectedId) ?? null}
+          onPatch={(patch) => {
+            if (!selectedId) return;
+            onChange(
+              boxes.map((b) => (b.id === selectedId ? { ...b, ...patch } : b))
+            );
+          }}
+        />
       )}
     </div>
   );

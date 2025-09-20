@@ -24,7 +24,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // electron/main.ts
 var import_electron8 = require("electron");
-var import_node_path5 = __toESM(require("path"), 1);
+var import_node_path6 = __toESM(require("path"), 1);
 
 // electron/ipc/handlers/boxes.ts
 var import_electron2 = require("electron");
@@ -188,6 +188,9 @@ function registerBoxesIpc() {
 
 // electron/ipc/handlers/templates.ts
 var import_electron3 = require("electron");
+var import_node_path2 = __toESM(require("path"), 1);
+var import_node_fs2 = __toESM(require("fs"), 1);
+var import_promises = __toESM(require("fs/promises"), 1);
 
 // electron/ipc/types.ts
 var import_zod = require("zod");
@@ -270,6 +273,12 @@ var printRunSchema = printPreviewSchema.extend({
 
 // electron/ipc/handlers/templates.ts
 var registered = false;
+function guessMime(p) {
+  const ext = import_node_path2.default.extname(p).toLowerCase();
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  return "image/png";
+}
 function registerTemplateIpc() {
   if (registered) return;
   registered = true;
@@ -278,6 +287,9 @@ function registerTemplateIpc() {
   import_electron3.ipcMain.removeHandler("templates:create");
   import_electron3.ipcMain.removeHandler("templates:update");
   import_electron3.ipcMain.removeHandler("templates:delete");
+  import_electron3.ipcMain.removeHandler("templates:pickBackground");
+  import_electron3.ipcMain.removeHandler("templates:clearBackground");
+  import_electron3.ipcMain.removeHandler("templates:getBackgroundDataUrl");
   import_electron3.ipcMain.handle("templates:list", () => {
     const db2 = getDb();
     return db2.prepare(
@@ -308,13 +320,11 @@ function registerTemplateIpc() {
       background_path: input?.background_path ?? null
     });
     const db2 = getDb();
-    const stmt = db2.prepare(
+    const info = db2.prepare(
       `INSERT INTO templates
          (name, width_mm, height_mm, dpi, orientation, margin_mm, background_path, updated_at)
-       VALUES
-         (@name, @width_mm, @height_mm, @dpi, @orientation, @margin_mm, @background_path, datetime('now'))`
-    );
-    const info = stmt.run(withDefaults);
+         VALUES (@name, @width_mm, @height_mm, @dpi, @orientation, @margin_mm, @background_path, datetime('now'))`
+    ).run(withDefaults);
     return { id: Number(info.lastInsertRowid) };
   });
   import_electron3.ipcMain.handle("templates:update", (_evt, id, patch) => {
@@ -323,27 +333,20 @@ function registerTemplateIpc() {
     const cleaned = {};
     for (const [k, v] of Object.entries(patch ?? {})) {
       if (v === void 0) continue;
-      if (k === "name" && typeof v === "string") {
-        cleaned.name = v.trim();
-      } else {
-        cleaned[k] = v;
-      }
+      cleaned[k] = k === "name" && typeof v === "string" ? v.trim() : v;
     }
     const valid = templateUpdateSchema.parse(cleaned);
     const keys = Object.keys(valid);
     if (!keys.length) return { updated: false };
     const setSql = keys.map((k) => `${k}=@${k}`).join(", ");
-    db2.prepare(
-      `UPDATE templates
-       SET ${setSql},
-           updated_at = datetime('now')
-     WHERE id = @id`
-    ).run({ id, ...valid });
+    db2.prepare(`UPDATE templates SET ${setSql}, updated_at = datetime('now') WHERE id = @id`).run({
+      id,
+      ...valid
+    });
     const row = db2.prepare(
       `SELECT id, name, width_mm, height_mm, dpi, orientation, margin_mm, background_path,
-              datetime(updated_at, 'localtime') AS updated_at
-         FROM templates
-        WHERE id = ?`
+                datetime(updated_at, 'localtime') AS updated_at
+         FROM templates WHERE id = ?`
     ).get(id);
     return { updated: true, row };
   });
@@ -355,6 +358,57 @@ function registerTemplateIpc() {
       db2.prepare("DELETE FROM templates WHERE id=?").run(id);
     });
     tx();
+  });
+  import_electron3.ipcMain.handle("templates:pickBackground", async (_evt, id) => {
+    idSchema.parse(id);
+    const filePaths = import_electron3.dialog.showOpenDialogSync({
+      title: "Choose background image",
+      properties: ["openFile"],
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }]
+    });
+    if (!filePaths || filePaths.length === 0) {
+      return { ok: false };
+    }
+    const src = filePaths[0];
+    const dir = import_node_path2.default.join(import_electron3.app.getPath("userData"), "backgrounds");
+    await import_promises.default.mkdir(dir, { recursive: true });
+    const ext = (import_node_path2.default.extname(src) || ".png").toLowerCase();
+    const dest = import_node_path2.default.join(dir, `template-${id}${ext}`);
+    await import_promises.default.copyFile(src, dest);
+    const db2 = getDb();
+    db2.prepare(
+      `UPDATE templates
+       SET background_path = ?, updated_at = datetime('now')
+     WHERE id = ?`
+    ).run(dest, id);
+    return { ok: true };
+  });
+  import_electron3.ipcMain.handle("templates:clearBackground", async (_evt, id) => {
+    idSchema.parse(id);
+    const db2 = getDb();
+    const row = db2.prepare("SELECT background_path FROM templates WHERE id = ?").get(id);
+    const p = row?.background_path;
+    if (p && import_node_fs2.default.existsSync(p)) {
+      try {
+        await import_promises.default.unlink(p);
+      } catch {
+      }
+    }
+    db2.prepare(
+      `UPDATE templates SET background_path = NULL, updated_at = datetime('now') WHERE id = ?`
+    ).run(id);
+    return { ok: true };
+  });
+  import_electron3.ipcMain.handle("templates:getBackgroundDataUrl", async (_evt, id) => {
+    idSchema.parse(id);
+    const db2 = getDb();
+    const row = db2.prepare("SELECT background_path FROM templates WHERE id = ?").get(id);
+    const p = row?.background_path;
+    if (!p || !import_node_fs2.default.existsSync(p)) return { ok: false, dataUrl: null };
+    const buf = await import_promises.default.readFile(p);
+    const mime = guessMime(p);
+    const dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
+    return { ok: true, dataUrl };
   });
 }
 
@@ -429,28 +483,28 @@ function registerChequesIpc() {
 
 // electron/ipc/handlers/print.ts
 var import_electron7 = require("electron");
-var import_node_path4 = __toESM(require("path"), 1);
+var import_node_path5 = __toESM(require("path"), 1);
 
 // electron/printing/print.ts
 var import_electron6 = require("electron");
-var import_node_path3 = __toESM(require("path"), 1);
+var import_node_path4 = __toESM(require("path"), 1);
 
 // electron/printing/url.ts
 var import_electron5 = require("electron");
-var import_node_fs2 = __toESM(require("fs"), 1);
-var import_node_path2 = __toESM(require("path"), 1);
+var import_node_fs3 = __toESM(require("fs"), 1);
+var import_node_path3 = __toESM(require("path"), 1);
 function findBuiltIndex() {
   const appPath = import_electron5.app.getAppPath();
   const resPath = process.resourcesPath ?? "";
   const candidates = [
-    import_node_path2.default.join(appPath, "dist", "renderer", "index.html"),
-    import_node_path2.default.join(resPath, "dist", "renderer", "index.html"),
-    import_node_path2.default.join(appPath, "dist", "index.html"),
-    import_node_path2.default.join(resPath, "dist", "index.html"),
-    import_node_path2.default.join(process.cwd(), "dist", "renderer", "index.html"),
-    import_node_path2.default.join(process.cwd(), "dist", "index.html")
+    import_node_path3.default.join(appPath, "dist", "renderer", "index.html"),
+    import_node_path3.default.join(resPath, "dist", "renderer", "index.html"),
+    import_node_path3.default.join(appPath, "dist", "index.html"),
+    import_node_path3.default.join(resPath, "dist", "index.html"),
+    import_node_path3.default.join(process.cwd(), "dist", "renderer", "index.html"),
+    import_node_path3.default.join(process.cwd(), "dist", "index.html")
   ];
-  const hit = candidates.find((p) => p && import_node_fs2.default.existsSync(p));
+  const hit = candidates.find((p) => p && import_node_fs3.default.existsSync(p));
   if (!hit) {
     throw new Error(
       `[getAppUrl] Could not locate renderer index.html.
@@ -464,11 +518,11 @@ function findBuiltPreview() {
   const appPath = import_electron5.app.getAppPath();
   const resPath = process.resourcesPath ?? "";
   const candidates = [
-    import_node_path2.default.join(appPath, "dist", "preview.html"),
-    import_node_path2.default.join(resPath, "dist", "preview.html"),
-    import_node_path2.default.join(process.cwd(), "dist", "preview.html")
+    import_node_path3.default.join(appPath, "dist", "preview.html"),
+    import_node_path3.default.join(resPath, "dist", "preview.html"),
+    import_node_path3.default.join(process.cwd(), "dist", "preview.html")
   ];
-  const hit = candidates.find((p) => p && import_node_fs2.default.existsSync(p));
+  const hit = candidates.find((p) => p && import_node_fs3.default.existsSync(p));
   if (!hit) {
     throw new Error(
       `[getAppUrl] Could not locate preview.html.
@@ -517,7 +571,7 @@ function createPrintWindow(show = false) {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: import_node_path3.default.join(process.cwd(), "dist-electron", "preload.cjs")
+      preload: import_node_path4.default.join(process.cwd(), "dist-electron", "preload.cjs")
     }
   });
 }
@@ -561,7 +615,7 @@ function registerPrintIpc() {
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
-        preload: import_node_path4.default.join(process.cwd(), "dist-electron", "preload.cjs")
+        preload: import_node_path5.default.join(process.cwd(), "dist-electron", "preload.cjs")
       }
     });
     const url = getAppUrl(
@@ -663,12 +717,12 @@ function createWindow() {
     show: false,
     // show after ready-to-show to avoid flashes
     webPreferences: {
-      preload: isDev ? import_node_path5.default.join(process.cwd(), "dist-electron", "preload.cjs") : import_node_path5.default.join(process.resourcesPath, "dist-electron", "preload.cjs"),
+      preload: isDev ? import_node_path6.default.join(process.cwd(), "dist-electron", "preload.cjs") : import_node_path6.default.join(process.resourcesPath, "dist-electron", "preload.cjs"),
       nodeIntegration: false,
       contextIsolation: true
     }
   });
-  const url = isDev ? process.env.VITE_DEV_SERVER_URL : `file://${import_node_path5.default.join(process.resourcesPath, "dist", "index.html")}`;
+  const url = isDev ? process.env.VITE_DEV_SERVER_URL : `file://${import_node_path6.default.join(process.resourcesPath, "dist", "index.html")}`;
   console.log("[main] isDev:", isDev, "\u2192 loading:", url);
   win.loadURL(url).catch((e) => console.error("[main] loadURL error:", e));
   win.once("ready-to-show", () => win.show());
